@@ -1,0 +1,14 @@
+# Ignore big mission data
+data/raw/*
+data/isis/*
+data/mapped/*
+data/png/*
+data/csv/*
+!data/.gitkeep
+
+# Ignore Jupyter auto stuff
+*.ipynb_checkpoints
+__pycache__/
+*.log
+*.tmp
+*.swp
