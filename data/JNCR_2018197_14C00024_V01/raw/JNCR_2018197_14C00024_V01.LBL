@@ -1,0 +1,67 @@
+PDS_VERSION_ID                = PDS3
+
+/* FILE CHARACTERISTICS */
+
+RECORD_TYPE                   = FIXED_LENGTH
+RECORD_BYTES                  = 3296
+FILE_RECORDS                  = 16128
+
+/* POINTERS TO DATA OBJECTS */
+
+^IMAGE                        = "JNCR_2018197_14C00024_V01.IMG"
+
+/* IDENTIFICATION DATA ELEMENTS */
+
+FILE_NAME                     = "JNCR_2018197_14C00024_V01.IMG"
+SPACECRAFT_NAME               = JUNO
+MISSION_PHASE_NAME            = "SCIENCE ORBITS"
+TARGET_NAME                   = "JUPITER"
+INSTRUMENT_ID                 = "JNC"
+INSTRUMENT_HOST_NAME          = "JUNO"
+INSTRUMENT_NAME               = "JUNO EPO CAMERA"
+PRODUCER_ID                   = JUNO_JUNOCAM_TEAM
+DATA_SET_ID                   = "JUNO-J-JUNOCAM-3-RDR-L1A-V1.0"
+STANDARD_DATA_PRODUCT_ID      = "JUNOCAM-RDR"
+PRODUCT_CREATION_TIME         = 2018-08-31T17:49:37
+PRODUCT_VERSION_ID            = "01"
+PRODUCT_ID                    = "JNCR_2018197_14C00024_V01"
+SOURCE_PRODUCT_ID             = "3D-09000E0018-2018-198T04.58.02"
+START_TIME                    = 2018-07-16T05:16:30.986
+IMAGE_TIME                    = 2018-07-16T05:16:30.986
+STOP_TIME                     = 2018-07-16T05:16:46.526
+SPACECRAFT_CLOCK_START_COUNT  = "584990442:50"
+SPACECRAFT_CLOCK_STOP_COUNT   = "N/A"
+
+/* DESCRIPTIVE DATA ELEMENTS */
+
+ORBIT_NUMBER                  = 14
+SOFTWARE_NAME                 = "JUNOMAKEPDS.PY 0.7"
+PROCESSING_LEVEL_ID           = "3"
+FOCAL_PLANE_TEMPERATURE       = 256.1 <K>
+INTERFRAME_DELAY              = 0.370 <s>
+SUB_SPACECRAFT_LATITUDE       = 19.8316
+SUB_SPACECRAFT_LONGITUDE      = 67.8176
+SPACECRAFT_ALTITUDE           = 3612.7 <km>
+SOLAR_DISTANCE                = 8.0699e+08 <km>
+SAMPLE_BIT_MODE_ID            = "SQROOT"
+EXPOSURE_DURATION             = 3.200000 <ms>
+JNO:TDI_STAGES_COUNT          = 1
+SAMPLING_FACTOR               = 1
+FILTER_NAME                   = ('BLUE', 'GREEN', 'RED')
+COMPRESSION_TYPE              = "HUFFMAN"
+RATIONALE_DESC                = "PJ14 North Tropical Band (relative time:
+PJ14-000T00:00)"
+
+/* DATA OBJECT DEFINITIONS */
+
+OBJECT                        = IMAGE
+  LINES                       = 16128
+  LINE_SAMPLES                = 1648
+  SAMPLE_TYPE                 = UNSIGNED_INTEGER
+  LINE_PREFIX_BYTES           = 0
+  LINE_SUFFIX_BYTES           = 0
+  SAMPLE_BITS                 = 16
+  SAMPLE_BIT_MASK             = 2#1111111111111111#
+  MD5_CHECKSUM                = "3644059d3df29d9e8b661128bc720538"
+END_OBJECT                    = IMAGE
+END

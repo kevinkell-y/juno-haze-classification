@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software or methodology, please cite it as below."
+title: "Juno Haze Classification System"
+authors:
+  - family-names: Kelly
+    given-names: Kevin
+version: 1.0.0
+date-released: 2026-01-18
+repository-code: "https://github.com/kevinkell-y/juno-haze-classification"
+keywords:
+  - Juno
+  - JunoCam
+  - planetary atmospheres
+  - detached haze
+  - limb geometry
+  - SPICE
+  - ISIS3
+license: MIT
