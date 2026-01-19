@@ -24,6 +24,8 @@ This repository accompanies the manuscript
 **“Detached Haze Classification Along the Jovian Limb Using JunoCam”**  
 and contains the complete software and workflow required to reproduce the published results.
 
+Two environment specifications are provided: environment.yml (portable) and env.lock.yml (exact replication of the software environment used to produce the published results).
+
 ---
 
 ## Repository Scope
