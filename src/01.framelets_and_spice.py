@@ -20,7 +20,6 @@ import argparse
 # Project layout: data/raw/*.{IMG,LBL}  ->  data/cub/*.cub
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SEARCH_DIRS = [PROJECT_ROOT / "data" / "raw", PROJECT_ROOT]
-CUB_DIR = PROJECT_ROOT / "data" / "cub"
 
 # Ensure ISIS in PATH and ISIS envs exist (don’t overwrite if already set)
 ENV = os.environ.copy()
@@ -108,6 +107,14 @@ def parse_args():
         required=True,
         help="Path to JunoCam .IMG file (with .LBL alongside)",
     )
+    p.add_argument(
+        "--outdir",
+        default=None,
+        help=(
+            "Output directory for stage-01 framelet cubes (default: "
+            "data/<IMG_NAME>/cub/stage_01_framelets)"
+        ),
+    )
     return p.parse_args()
 
 
@@ -134,12 +141,18 @@ def main():
 
     print(f"Found label: {lbl}")
 
-    print(f"Converting {IMG_NAME}.LBL/.IMG -> framelet CUBs in {CUB_DIR} ...")
-    junocam2isis(lbl, CUB_DIR, IMG_NAME)
+        # Default: data/<IMG_NAME>/cub/stage_01_framelets
+    if args.outdir is None:
+        out_dir = PROJECT_ROOT / "data" / IMG_NAME / "cub" / "stage_01_framelets"
+    else:
+        out_dir = Path(args.outdir).resolve()
 
-    cubs = list_framelets(CUB_DIR, IMG_NAME)
+    print(f"Converting {IMG_NAME}.LBL/.IMG -> framelet CUBs in {out_dir} ...")
+    junocam2isis(lbl, out_dir, IMG_NAME)
+
+    cubs = list_framelets(out_dir, IMG_NAME)
     if not cubs:
-        die("No framelet .cub files detected. Update CUB_DIR/pattern if needed.")
+        die("No framelet .cub files detected. Update out_dir/pattern if needed.")
 
     print(f"Found {len(cubs)} framelet cubes; running offline spiceinit + manifests ...")
     for cub in cubs:
@@ -153,7 +166,7 @@ def main():
 
     print("\n✅ Stage 1 complete.")
     print("Outputs:")
-    print(" - Framelet cubes:", CUB_DIR)
+    print(" - Framelet cubes:", out_dir)
     print(" - Kernel manifests: *_kernels.txt next to each cube")
 
 if __name__ == "__main__":
