@@ -2,7 +2,7 @@
 """
 04.plot_rectified_perpendiculars.py
 
-Stage 3b: In rectified space, detect the two limb edges (paired fragments) per column,
+Stage 4: In rectified space, detect the two limb edges (paired fragments) per column,
 compute their midpoint, generate perpendicular sample points, associate each point with
 original pixel coordinates + pixel_value via the rectified mapping, and export:
 
@@ -106,24 +106,20 @@ def find_rectified_image(mapping_csv: Path) -> Path:
         f"Could not find rectified image next to mapping CSV. Looked for:\n  {tif}\n  {png}"
     )
 
-def find_cub_for_mapping(mapping_csv: Path) -> Path:
-    """
-    Given *_RECTIFIED_MAPPING.csv, find the corresponding .cub in the same directory.
-
-    For now you said everything lives together (framelets, cubs, csvs, rectified images).
-    We assume the cub shares the same base stem.
-    """
+def find_cub_for_mapping(mapping_csv: Path, framelet_dir: Path) -> Path:
     stem = mapping_csv.name.replace("_RECTIFIED_MAPPING.csv", "")
-    exact = mapping_csv.with_name(stem + ".cub")
+    exact = framelet_dir / f"{stem}.cub"
+
     if exact.exists():
         return exact
 
-    # fallback: any cube starting with the stem
-    matches = sorted(mapping_csv.parent.glob(stem + "*.cub"))
+    matches = sorted(framelet_dir.glob(stem + "*.cub"))
     if matches:
         return matches[0]
 
-    raise FileNotFoundError(f"No .cub found for stem={stem} next to {mapping_csv.name}")
+    raise FileNotFoundError(
+        f"No framelet .cub found for {stem} in {framelet_dir}"
+    )
 
 
 # ----------------------------
@@ -362,27 +358,27 @@ def save_overlay_png(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Stage 3b: Detect rectified limb edges, build perpendicular samples, export overlay + CSV."
+        description="Stage 4: Detect rectified limb edges, build perpendicular samples, export overlay + CSV."
     )
-    p.add_argument(
-        "--mapping",
-        type=str,
-        default="",
-        help="Path to *_RECTIFIED_MAPPING.csv. If omitted, uses first match in PROJECT_ROOT/data/cub/",
-    )
+   
     p.add_argument("--x-step", type=int, default=20, help="Sample stride in x for edge detection.")
     p.add_argument("--y-margin", type=int, default=5, help="Exclude y edges when detecting gradients.")
     p.add_argument("--edge-min-sep", type=int, default=12, help="Min separation (pixels) between detected edges.")
     p.add_argument("--half-len", type=int, default=80, help="Half-length (pixels) of perpendicular sampling line.")
     p.add_argument("--dy-step", type=int, default=2, help="Pixel step between red dots along the perpendicular.")
     p.add_argument("--no-overlay", action="store_true", help="Skip saving overlay image.")
-    p.add_argument("--batch", action="store_true", help="Process all *_RECTIFIED_MAPPING.csv in data/cub/")
-    p.add_argument("--cub-dir", type=str, default="", help="Override cub directory (default: PROJECT_ROOT/data/cub)")
     p.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs if present.")
+    p.add_argument("--indir", required=True, help="Stage 3 directory containing *_RECTIFIED_MAPPING.csv files")
+
+    p.add_argument("--framelet-dir", required=True, help="Stage 1 directory containing framelet .cub files")
+    p.add_argument("--outdir", required=True, help="Stage 4 output directory (stage_04_perp_samples)")
+    p.add_argument("--mapping", default="", help="Optional: process a single *_RECTIFIED_MAPPING.csv")
+    p.add_argument("--batch", action="store_true", help="Process all *_RECTIFIED_MAPPING.csv files in --indir")
+
     return p.parse_args()
 
-def iter_mapping_csvs(cub_dir: Path) -> List[Path]:
-    return sorted(cub_dir.glob("*_RECTIFIED_MAPPING.csv"))
+def iter_mapping_csvs(indir: Path):
+    return sorted(indir.glob("*_RECTIFIED_MAPPING.csv"))
 
 def run_campt_cli(cub_path: Path, samples: List[SamplePoint]) -> pd.DataFrame:
     """
@@ -439,40 +435,41 @@ def attach_campt_df(samples: List[SamplePoint], campt_df: pd.DataFrame) -> None:
         s.spice = campt_df.iloc[i].to_dict()
 
 
-def process_one(mapping_csv: Path, args: argparse.Namespace) -> None:
+def process_one(mapping_csv, args, outdir: Path, framelet_dir: Path):
     rect_img_path = find_rectified_image(mapping_csv)
 
     stem = mapping_csv.name.replace("_RECTIFIED_MAPPING.csv", "")
-    out_csv = mapping_csv.with_name(stem + "_RECTIFIED_PERP_SAMPLES.csv")
-    out_png = mapping_csv.with_name(stem + "_RECTIFIED_PERP_OVERLAY.png")
+    out_csv = outdir / f"{stem}_RECTIFIED_PERP_SAMPLES.csv"
+    out_png = outdir / f"{stem}_RECTIFIED_PERP_OVERLAY.png"
+
 
     if (out_csv.exists() or out_png.exists()) and (not args.overwrite):
         print(f"[SKIP] {stem} (outputs exist)")
         return
 
-    print(f"\n[Stage 3b] Mapping CSV:   {mapping_csv.name}")
-    print(f"[Stage 3b] Rectified img: {rect_img_path.name}")
+    print(f"\n[Stage 4] Mapping CSV:   {mapping_csv.name}")
+    print(f"[Stage 4] Rectified img: {rect_img_path.name}")
 
     rect_gray = read_image_grayscale(rect_img_path)
 
-    print("[Stage 3b] Loading mapping (one-time)...")
+    print("[Stage 4] Loading mapping CSV...")
     mapping = load_rectified_mapping(mapping_csv)
-    print(f"[Stage 3b] Mapping loaded: {len(mapping):,} entries")
+    print(f"[Stage 4] Mapping loaded: {len(mapping):,} entries")
 
-    print("[Stage 3b] Detecting paired limb edges in rectified space...")
+    print("[Stage 4] Detecting paired limb edges in rectified space...")
     edge_pairs = detect_edge_pairs(
         rect_gray,
         x_step=args.x_step,
         y_margin=args.y_margin,
         edge_min_sep=args.edge_min_sep,
     )
-    print(f"[Stage 3b] Edge pairs found: {len(edge_pairs)}")
+    print(f"[Stage 4] Edge pairs found: {len(edge_pairs)}")
 
     if not edge_pairs:
         print(f"[WARN] No edge pairs detected for {stem}. Try tuning --edge-min-sep / --x-step.")
         return
 
-    print("[Stage 3b] Generating perpendicular samples + mapping association...")
+    print("[Stage 4] Generating perpendicular samples + mapping association...")
     samples = generate_perpendicular_samples(
         edge_pairs=edge_pairs,
         mapping=mapping,
@@ -480,10 +477,10 @@ def process_one(mapping_csv: Path, args: argparse.Namespace) -> None:
         dy_step=args.dy_step,
     )
     
-    print(f"[Stage 3b] Sample points: {len(samples)}")
+    print(f"[Stage 4] Sample points: {len(samples)}")
 
-    print("[Stage 3b] Finding .cub and running CAMPT for red-dot pixels...")
-    cub_path = find_cub_for_mapping(mapping_csv)
+    print("[Stage 4] Finding .cub and running CAMPT for red-dot pixels...")
+    cub_path = find_cub_for_mapping(mapping_csv, framelet_dir)
 
     campt_df = run_campt_cli(cub_path, samples)
 
@@ -495,10 +492,10 @@ def process_one(mapping_csv: Path, args: argparse.Namespace) -> None:
 
     attach_campt_df(samples, campt_df)
 
-    print(f"[Stage 3b] CAMPT attached: {len(samples)} points")
+    print(f"[Stage4] CAMPT attached: {len(samples)} points")
     
     write_samples_csv(out_csv, samples)
-    print(f"[Stage 3b] Wrote samples CSV: {out_csv.name}")
+    print(f"[Stage 4] Wrote samples CSV: {out_csv.name}")
 
 
 
@@ -510,33 +507,43 @@ def process_one(mapping_csv: Path, args: argparse.Namespace) -> None:
             samples,
             title=stem,
         )
-        print(f"[Stage 3b] Wrote overlay PNG: {out_png.name}")
+        print(f"[Stage 4] Wrote overlay PNG: {out_png.name}")
 
 def main() -> None:
     args = parse_args()
 
-    cub_dir = Path(args.cub_dir).expanduser().resolve() if args.cub_dir else (PROJECT_ROOT / "data" / "cub")
+    indir = Path(args.indir).expanduser().resolve()
+    framelet_dir = Path(args.framelet_dir).expanduser().resolve()
+    outdir = Path(args.outdir).expanduser().resolve()
 
-    if args.batch:
-        mapping_csvs = iter_mapping_csvs(cub_dir)
-        if not mapping_csvs:
-            raise FileNotFoundError(f"No *_RECTIFIED_MAPPING.csv found in {cub_dir}")
-        print(f"[Stage 3b] Batch mode: {len(mapping_csvs)} framelets in {cub_dir}")
-        for m in mapping_csvs:
-            process_one(m, args)
-        print("\n[Stage 3b] Batch complete.")
-        return
+    if not indir.exists():
+        raise FileNotFoundError(f"indir not found: {indir}")
 
-    # single-file mode (what you already had)
+    if not framelet_dir.exists():
+        raise FileNotFoundError(f"framelet-dir not found: {framelet_dir}")
+
+    outdir.mkdir(parents=True, exist_ok=True)
+
+
+    # Choose which mapping CSVs to process
     if args.mapping:
-        mapping_csv = Path(args.mapping).expanduser().resolve()
+        mapping_csvs = [Path(args.mapping).expanduser().resolve()]
     else:
-        cands = iter_mapping_csvs(cub_dir)
-        if not cands:
-            raise FileNotFoundError(f"No *_RECTIFIED_MAPPING.csv found in {cub_dir}")
-        mapping_csv = cands[0]
+        mapping_csvs = iter_mapping_csvs(indir)
+        if not mapping_csvs:
+            raise FileNotFoundError(f"No *_RECTIFIED_MAPPING.csv found in {indir}")
 
-    process_one(mapping_csv, args)
+        # If not batch, just take the first one as a quick smoke test
+        if not args.batch:
+            mapping_csvs = [mapping_csvs[0]]
+
+    # Process
+    for mapping_csv in mapping_csvs:
+        try:
+            process_one(mapping_csv, args, outdir, framelet_dir)
+        except Exception as e:
+            print(f"[error] {mapping_csv.name}: {e}")
+
 
 
 
