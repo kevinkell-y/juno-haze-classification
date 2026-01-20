@@ -102,7 +102,14 @@ def main():
     print("which spiceinit   :", shutil.which("spiceinit",   path=ENV["PATH"]))
     print("which catlab      :", shutil.which("catlab",      path=ENV["PATH"]))
 
-    lbl = find_label(IMG_NAME)
+    img_path = Path(args.img).resolve()
+    lbl = img_path.with_suffix(".LBL")
+
+    if not lbl.exists():
+        raise FileNotFoundError(
+            f"Expected label file next to IMG but did not find it:\n{lbl}"
+        )
+
     print(f"Found label: {lbl}")
 
     print(f"Converting {IMG_NAME}.LBL/.IMG -> framelet CUBs in {CUB_DIR} ...")
