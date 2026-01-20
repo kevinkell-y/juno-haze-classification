@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 # 03.rectify_limb.py — rectifies Stage-2 limb polylines into a tangent-plane strip.
-# Inputs next to each framelet: <stem>.tif (preferred) or <stem>.png + <stem>_LIMBENDPOINTS.csv
-# Outputs next to inputs: <stem>_RECTIFIED.tif/.png and <stem>_RECTIFIED_MAPPING.csv
+# Inputs:
+#   Stage-2 limb polylines (*_LIMBENDPOINTS.csv)
+#   Stage-1 framelet radiance images (*.tif / *.png)
+# Outputs:
+#   Stage-3 rectified limb strips and mapping tables
 
 import sys, glob, csv, math
 from pathlib import Path
 import numpy as np
 from PIL import Image
+import argparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,14 +36,6 @@ def load_limb_points(csv_file: Path):
             dedup.append(p)
     print(f"✅ Loaded {len(dedup)} limb points from {csv_file.name}")
     return dedup
-
-def find_image_for_csv(csv_path: Path):
-    stem = csv_path.name.replace("_LIMBENDPOINTS.csv", "")
-    tif = csv_path.with_name(stem + ".tif")
-    png = csv_path.with_name(stem + ".png")
-    if tif.exists(): return tif
-    if png.exists(): return png
-    raise FileNotFoundError(f"No image found for {csv_path.name} (looked for {tif.name} / {png.name})")
 
 def load_image_16bit(path: Path):
     arr = np.array(Image.open(path))
@@ -203,17 +199,30 @@ def rectify_limb(arr, limb_points, x_step=20, y_step=96, spacing=8.0, trim_px=8.
 
 # --------------- Per-file workflow ---------------
 
-def process_csv(csv_path: Path, x_step=20, y_step=96, spacing=8.0, trim_px=8.0, radius=12.0):
-    img_path = find_image_for_csv(csv_path)
+def process_csv(csv_path: Path, image_dir: Path, outdir: Path,
+                x_step=20, y_step=96, spacing=8.0, trim_px=8.0, radius=12.0):
+    stem = csv_path.name.replace("_LIMBENDPOINTS.csv", "")
+
+    candidates = [
+        image_dir / f"{stem}.tif",
+        image_dir / f"{stem}.png",
+    ]
+
+    img_path = next((p for p in candidates if p.exists()), None)
+    if img_path is None:
+        raise FileNotFoundError(
+            f"No image found for {csv_path.name} in {image_dir}"
+        )
+    
     arr = load_image_16bit(img_path)
     print(f"TIFF/PNG: {img_path.name}  shape={arr.shape}  dtype={arr.dtype}  range={arr.min()}–{arr.max()}")
 
     limb_pts = load_limb_points(csv_path)
 
     stem = csv_path.name.replace("_LIMBENDPOINTS.csv", "")
-    rect_tif = csv_path.with_name(stem + "_RECTIFIED.tif")
-    rect_png = csv_path.with_name(stem + "_RECTIFIED.png")
-    map_csv  = csv_path.with_name(stem + "_RECTIFIED_MAPPING.csv")
+    rect_tif = outdir / f"{stem}_RECTIFIED.tif"
+    rect_png = outdir / f"{stem}_RECTIFIED.png"
+    map_csv  = outdir / f"{stem}_RECTIFIED_MAPPING.csv"
 
     rect = rectify_limb(arr, limb_pts,
                         x_step=x_step, y_step=y_step,
@@ -230,27 +239,71 @@ def process_csv(csv_path: Path, x_step=20, y_step=96, spacing=8.0, trim_px=8.0, 
 # --------------- Main ---------------
 
 def main():
-    args = sys.argv[1:]
-    patterns = args if args else [str(PROJECT_ROOT / "data" / "cub" / "*_LIMBENDPOINTS.csv")]
+    parser = argparse.ArgumentParser(
+        description="Stage 03 — rectify limb polylines into tangent-plane strips"
+    )
+    parser.add_argument(
+        "--indir",
+        required=True,
+        help="Input directory containing *_LIMBENDPOINTS.csv from Stage 2"
+    )
+    parser.add_argument(
+        "--outdir",
+        required=True,
+        help="Output directory for rectified limb products (stage_03_rectified)"
+    )
+    parser.add_argument(
+        "--x-step", type=int, default=20
+    )
+    parser.add_argument(
+        "--y-step", type=int, default=96
+    )
+    parser.add_argument(
+        "--spacing", type=float, default=8.0
+    )
+    parser.add_argument(
+        "--trim-px", type=float, default=8.0
+    )
+    parser.add_argument(
+        "--radius", type=float, default=12.0
+    )
+    parser.add_argument(
+        "--imagedir", required=True, help="Directory containing original framelet images from Stage 1"
+    )
 
-    csvs = []
-    for pat in patterns:
-        matches = [Path(p) for p in glob.glob(pat)]
-        if matches:
-            csvs.extend(matches)
-        elif pat.lower().endswith("_limbendpoints.csv"):
-            csvs.append(Path(pat))
-        else:
-            print(f"(skip) no matches for {pat}")
+    args = parser.parse_args()
 
+    indir = Path(args.indir).resolve()
+    outdir = Path(args.outdir).resolve()
+
+    if not indir.exists():
+        raise FileNotFoundError(f"Input directory not found: {indir}")
+
+    imagedir = Path(args.imagedir).resolve()
+    if not imagedir.exists():
+        raise FileNotFoundError(f"Image directory not found: {imagedir}")
+
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    csvs = sorted(indir.glob("*_LIMBENDPOINTS.csv"))
     if not csvs:
-        print("No *_LIMBENDPOINTS.csv found."); sys.exit(1)
+        raise RuntimeError(f"No *_LIMBENDPOINTS.csv found in {indir}")
 
-    for p in sorted(csvs):
+    for csv_path in csvs:
         try:
-            process_csv(p)  # defaults: x_step=20, y_step=96, spacing=8, trim=8, radius=12
+            process_csv(
+                csv_path,
+                image_dir=imagedir,
+                outdir=outdir,
+                x_step=args.x_step,
+                y_step=args.y_step,
+                spacing=args.spacing,
+                trim_px=args.trim_px,
+                radius=args.radius
+            )
         except Exception as e:
-            print(f"[error] {p.name}: {e}")
+            print(f"[error] {csv_path.name}: {e}")
+
 
 if __name__ == "__main__":
     main()
