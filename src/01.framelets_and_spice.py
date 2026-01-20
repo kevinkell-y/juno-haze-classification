@@ -15,9 +15,7 @@ Group: Planetary Science 322
 
 from pathlib import Path
 import os, sys, glob, shutil, subprocess, re
-
-# ---- config (edit IMG_NAME if processing a different image)
-IMG_NAME = "JNCR_2018197_14C00024_V01"
+import argparse
 
 # Project layout: data/raw/*.{IMG,LBL}  ->  data/cub/*.cub
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -26,8 +24,14 @@ CUB_DIR = PROJECT_ROOT / "data" / "cub"
 
 # Ensure ISIS in PATH and ISIS envs exist (don’t overwrite if already set)
 ENV = os.environ.copy()
-ENV.setdefault("ISISROOT", "/home/user/miniconda/envs/juno-isis")
-ENV.setdefault("ISISDATA", "/home/user/miniconda/envs/juno-isis/isisdata")
+
+if "ISISROOT" not in ENV or "ISISDATA" not in ENV:
+    sys.exit(
+        "ISIS environment not detected.\n"
+        "Activate your ISIS conda environment before running:\n"
+        "  conda activate isis-8.3.0"
+    )
+
 isis_bin = Path(ENV["ISISROOT"]) / "bin"
 if isis_bin.as_posix() not in ENV.get("PATH", ""):
     ENV["PATH"] = f"{isis_bin}:{ENV.get('PATH','')}"
@@ -50,16 +54,16 @@ def find_label(img_base: str) -> Path:
     print(f"Could not find {img_base}.LBL in {', '.join(map(str, SEARCH_DIRS))}", file=sys.stderr)
     sys.exit(1)
 
-def junocam2isis(lbl_path: Path, out_dir: Path) -> None:
+def junocam2isis(lbl_path: Path, out_dir: Path, img_name: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    base_cub = out_dir / f"{IMG_NAME}.cub"
+    base_cub = out_dir / f"{img_name}.cub"
     try:
         run(["junocam2isis", f"from={lbl_path}", f"to={base_cub}"])
     except subprocess.CalledProcessError as e:
         die("junocam2isis failed", e)
 
-def list_framelets(out_dir: Path) -> list[Path]:
-    pattern = out_dir / f"{IMG_NAME}_*.cub"
+def list_framelets(out_dir: Path, img_name: str) -> list[Path]:
+    pattern = out_dir / f"{img_name}_*.cub"
     cubs = sorted(Path(p) for p in glob.glob(str(pattern)))
     if not cubs:
         print(f"WARNING: no framelet cubes found with {pattern}")
@@ -95,27 +99,45 @@ def write_manifest(cub: Path, pvl: str) -> Path:
     out.write_text(pvl)
     return out
 
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Stage 1 — JunoCam framelet ingestion + SPICE"
+    )
+    p.add_argument(
+        "--img",
+        required=True,
+        help="Path to JunoCam .IMG file (with .LBL alongside)",
+    )
+    return p.parse_args()
+
+
 def main():
+    args = parse_args()
+
+    img_path = Path(args.img).resolve()
+
+    if not img_path.exists():
+        raise FileNotFoundError(img_path)
+
+    IMG_NAME = img_path.stem
+    
+    lbl = img_path.with_suffix(".LBL")
+    if not lbl.exists():
+        raise FileNotFoundError(
+            f"Expected label file next to IMG but did not find:\n{lbl}"
+        )
     print("ISISROOT:", ENV.get("ISISROOT"))
     print("ISISDATA:", ENV.get("ISISDATA"))
     print("which junocam2isis:", shutil.which("junocam2isis", path=ENV["PATH"]))
     print("which spiceinit   :", shutil.which("spiceinit",   path=ENV["PATH"]))
     print("which catlab      :", shutil.which("catlab",      path=ENV["PATH"]))
 
-    img_path = Path(args.img).resolve()
-    lbl = img_path.with_suffix(".LBL")
-
-    if not lbl.exists():
-        raise FileNotFoundError(
-            f"Expected label file next to IMG but did not find it:\n{lbl}"
-        )
-
     print(f"Found label: {lbl}")
 
     print(f"Converting {IMG_NAME}.LBL/.IMG -> framelet CUBs in {CUB_DIR} ...")
-    junocam2isis(lbl, CUB_DIR)
+    junocam2isis(lbl, CUB_DIR, IMG_NAME)
 
-    cubs = list_framelets(CUB_DIR)
+    cubs = list_framelets(CUB_DIR, IMG_NAME)
     if not cubs:
         die("No framelet .cub files detected. Update CUB_DIR/pattern if needed.")
 
