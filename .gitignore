@@ -39,3 +39,6 @@ data/**/stage_*_outputs/
 !data/**/raw/*.IMG
 !data/**/raw/*.LBL
 
+# LibreOffice temporary files
+.~lock.*
+
