@@ -11,6 +11,7 @@ import sys, glob, csv, math, subprocess
 import numpy as np
 from PIL import Image, ImageDraw
 import matplotlib.pyplot as plt
+import argparse
 
 # Project root (…/juno)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -211,18 +212,15 @@ def draw_dots(image: Image.Image, pts, color=(38, 247, 253), r=1):
     for x, y in pts:
         draw.ellipse((x - r, y - r, x + r, y + r), fill=color)
 
-def save_outputs(cub_path: Path, png_path: Path, pts):
-    out_dir = cub_path.parent
+def save_outputs(cub_path: Path, png_path: Path, pts, outdir: Path):
     stem = cub_path.stem
 
-    # overlay beside the CUB
     color = Image.open(png_path).convert("RGB")
     draw_dots(color, pts, color=(38, 247, 253), r=1)
-    overlay_path = out_dir / f"{stem}_OVERLAY.png"
+    overlay_path = outdir / f"{stem}_OVERLAY.png"
     color.save(overlay_path, "PNG")
 
-    # CSV beside the CUB
-    csv_path = out_dir / f"{stem}_LIMBENDPOINTS.csv"
+    csv_path = outdir / f"{stem}_LIMBENDPOINTS.csv"
     with open(csv_path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["x", "y"])
@@ -233,11 +231,11 @@ def save_outputs(cub_path: Path, png_path: Path, pts):
 
 # ------------------------- Per-file & Main ---------------------
 
-def process_cub(cub_path: Path, show=True):
+def process_cub(cub_path: Path, outdir: Path, show=True):
     tif_path, png_path = cub_to_images(cub_path)
     img = Image.open(png_path)
     pts = trace_limb_polyline(img)
-    save_outputs(cub_path, png_path, pts)
+    save_outputs(cub_path, png_path, pts, outdir)
 
     if show:
         # matplotlib sanity check; close window to continue
@@ -252,32 +250,45 @@ def process_cub(cub_path: Path, show=True):
         plt.show()
 
 def main():
-    show = True
-    args = sys.argv[1:]
-    if args and args[0] == "--noshow":
-        show = False
-        args = args[1:]
+    parser = argparse.ArgumentParser(
+        description="Stage 02 — trace planetary limb polylines from framelet CUBs"
+    )
+    parser.add_argument(
+        "--cubdir",
+        required=True,
+        help="Input directory of framelet CUBs (stage_01_framelets)"
+    )
+    parser.add_argument(
+        "--outdir",
+        required=True,
+        help="Output directory for limb polylines (stage_02_trace_polyline)"
+    )
+    parser.add_argument(
+        "--noshow",
+        action="store_true",
+        help="Disable matplotlib preview windows"
+    )
 
-    if args:
-        paths = []
-        for pat in args:
-            matches = glob.glob(pat)
-            paths.extend(matches if matches else [pat])
-        cubs = [Path(p) for p in paths if Path(p).suffix.lower() in (".cub", ".png")]
-    else:
-        cubs = sorted((PROJECT_ROOT / "data" / "cub").glob("*.cub"))
+    args = parser.parse_args()
+    cubdir = Path(args.cubdir)
+    outdir = Path(args.outdir)
+    show = not args.noshow
 
+    if not cubdir.exists():
+        raise FileNotFoundError(f"Input cubdir not found: {cubdir}")
+
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    cubs = sorted(cubdir.glob("*.cub"))
     if not cubs:
-        print("No input files (default looked in data/cub).")
-        sys.exit(1)
+        raise RuntimeError(f"No .cub files found in {cubdir}")
 
-    for c in cubs:
+    for cub in cubs:
         try:
-            process_cub(Path(c), show=show)
-        except subprocess.CalledProcessError as e:
-            print(f"[isis error] {Path(c).name}: {e}")
+            process_cub(cub, outdir=outdir, show=show)
         except Exception as e:
-            print(f"[error] {Path(c).name}: {e}")
+            print(f"[error] {cub.name}: {e}")
+
 
 if __name__ == "__main__":
     main()
