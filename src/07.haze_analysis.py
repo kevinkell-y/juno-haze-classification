@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-Stage 5 — Aggregate Stage 6 peak classifications across fragments/framelets,
+Stage 7 — Aggregate Stage 6 peak classifications across fragments/framelets,
 and evaluate detached haze occurrence as a function of latitude using the
 first-available SPICE latitude per fragment.
 
 Inputs:
-  - One or more *_STAGE6.csv files produced by src/06.peakfinder.py
+  - *_STAGE6.csv files produced by src/06.peakfinder.py
 
 Outputs (in --outdir):
-  - stage5_fragment_table.csv  (one row per fragment)
-  - stage5_latitude_bins.csv   (binned summary)
-  - stage5_occurrence_by_lat.png
+  - stage7_fragment_table.csv
+  - stage7_latitude_bins.csv
+  - stage7_occurrence_by_lat.png
 """
+
 
 from __future__ import annotations
 
@@ -29,10 +30,16 @@ import matplotlib.pyplot as plt
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser()
     ap.add_argument(
+        "--imgdir",
+        type=str,
+        required=True,
+        help="IMG-scoped root directory, e.g. data/JNCR_2018197_14C00024_V01",
+    )
+    ap.add_argument(
         "--stage6-root",
         type=str,
-        default="data/cub/stage_06_peaks",
-        help="Root directory containing Stage 6 outputs (framelet folders).",
+        default=None,
+        help="Optional override. Default: <imgdir>/cub/stage_06_peaks",
     )
     ap.add_argument(
         "--glob",
@@ -43,8 +50,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--outdir",
         type=str,
-        default="data/analysis/stage_05",
-        help="Output directory for Stage 5 results.",
+        default=None,
+        help="Optional override. Default: <imgdir>/analysis/stage_07",
     )
     ap.add_argument(
         "--bin-width-deg",
@@ -74,7 +81,7 @@ def parse_args() -> argparse.Namespace:
         "--img-label",
         type=str,
         default=None,
-        help="Optional label to stamp on the Stage 5 plot (top-left). If omitted, inferred from Stage 6 filenames.",
+        help="Optional label to stamp on the Stage 7 plot (top-left). If omitted, inferred from Stage 6 filenames.",
     )
     return ap.parse_args()
 
@@ -230,10 +237,11 @@ def plot_occurrence(summary: pd.DataFrame, out_png: Path, img_label: str | None 
             0.02, 0.98,
             f"JunoCam IMG: {img_label}",
             transform=ax.transAxes,
-            fontsize=10,
+            fontsize=13,
             verticalalignment="top",
             horizontalalignment="left",
-            alpha=0.7
+            color="#071ecd",
+            alpha=1
         )
 
     # Mark low-N bins
@@ -249,8 +257,11 @@ def plot_occurrence(summary: pd.DataFrame, out_png: Path, img_label: str | None 
 def main() -> None:
     args = parse_args()
 
-    stage6_root = Path(args.stage6_root)
-    outdir = Path(args.outdir)
+    imgdir = Path(args.imgdir).resolve()
+
+    stage6_root = Path(args.stage6_root).resolve() if args.stage6_root else (imgdir / "cub" / "stage_06_peaks")
+    outdir = Path(args.outdir).resolve() if args.outdir else (imgdir / "analysis" / "stage_07")
+
     outdir.mkdir(parents=True, exist_ok=True)
 
     stage6_csvs = sorted(stage6_root.glob(args.glob))
@@ -258,20 +269,20 @@ def main() -> None:
         raise FileNotFoundError(f"No Stage 6 CSVs found under {stage6_root} with glob '{args.glob}'")
 
     df_frag = build_fragment_table(stage6_csvs, lat_col=args.lat_col, peak_col=args.peak_col)
-    frag_out = outdir / "stage5_fragment_table.csv"
+    frag_out = outdir / "stage7_fragment_table.csv"
     df_frag.to_csv(frag_out, index=False)
 
     df_bins = bin_latitudes(df_frag, bin_width=float(args.bin_width_deg), min_n=int(args.min_fragments_per_bin))
-    bins_out = outdir / "stage5_latitude_bins.csv"
+    bins_out = outdir / "stage7_latitude_bins.csv"
     df_bins.to_csv(bins_out, index=False)
 
     img_label = args.img_label or infer_img_label_from_stage6(stage6_csvs)
 
-    plot_path = outdir / "stage5_occurrence_by_lat.png"
+    plot_path = outdir / "stage7_occurrence_by_lat.png"
     plot_occurrence(df_bins, plot_path, img_label=img_label)
 
 
-    print("[Stage 5] Complete")
+    print("[Stage 7] Complete")
     print(f"  Fragment table → {frag_out}")
     print(f"  Bin summary    → {bins_out}")
     print(f"  Plot           → {plot_path}")
