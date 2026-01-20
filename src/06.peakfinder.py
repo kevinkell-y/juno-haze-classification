@@ -15,18 +15,14 @@ from scipy.signal import savgol_filter, find_peaks
 
 def parse_args():
     p = argparse.ArgumentParser(description="Stage 6 Peak Finder (Juno haze)")
-    p.add_argument("--csv", required=True, help="*_RECTIFIED_PERP_SAMPLES.csv")
-    p.add_argument("--smooth", type=int, default=5,
-                help="Savitzky-Golay window for ΔBrightness (odd, >=3)")
+    p.add_argument("--indir", required=True, help="Directory containing *_RECTIFIED_PERP_SAMPLES.csv files")
+    p.add_argument("--outdir", required=True, help="IMG-scoped output directory for Stage 6")
+    p.add_argument("--smooth", type=int, default=5, help="Savitzky-Golay window for ΔBrightness (odd, >=3)")
     p.add_argument("--savgol-poly", type=int, default=2)
-    p.add_argument("--max-secondary-sep-px", type=int, default=40,
-                help="Max index (pixel) separation between PRIMARY and SECONDARY")
-    p.add_argument("--min-secondary-sep-px", type=int, default=3,
-                help="Minimum index separation between PRIMARY and SECONDARY")
-    p.add_argument("--min-secondary-frac",type=float,default=0.12,
-                help="Minimum secondary peak strength as fraction of PRIMARY ΔBrightness")
-    p.add_argument("--min-secondary-abs",type=float,default=400,
-                help="Absolute minimum ΔBrightness for secondary peak")
+    p.add_argument("--max-secondary-sep-px", type=int, default=40, help="Max index (pixel) separation between PRIMARY and SECONDARY")
+    p.add_argument("--min-secondary-sep-px", type=int, default=3, help="Minimum index separation between PRIMARY and SECONDARY")
+    p.add_argument("--min-secondary-frac",type=float,default=0.12, help="Minimum secondary peak strength as fraction of PRIMARY ΔBrightness")
+    p.add_argument("--min-secondary-abs",type=float,default=400, help="Absolute minimum ΔBrightness for secondary peak")
 
     return p.parse_args()
 
@@ -231,35 +227,43 @@ def analyze_fragment(frag_df, args, framelet_name):
 # CSV-level processing
 # ============================================================
 
-def process_csv(csv_path, args):
-    df = pd.read_csv(csv_path)
+def process_directory(indir: Path, outdir: Path, args):
+    csv_files = sorted(indir.glob("*_RECTIFIED_PERP_SAMPLES.csv"))
 
-    framelet = csv_path.stem.replace("_RECTIFIED_PERP_SAMPLES", "")
-    out_dir = csv_path.parent / "stage_06_peaks" / framelet
-    plot_dir = out_dir / "plots"
+    if not csv_files:
+        raise RuntimeError(f"No *_RECTIFIED_PERP_SAMPLES.csv files found in {indir}")
 
-    plot_dir.mkdir(parents=True, exist_ok=True)
+    for csv_path in csv_files:
+        df = pd.read_csv(csv_path)
 
-    augmented = []
+        framelet = csv_path.stem.replace("_RECTIFIED_PERP_SAMPLES", "")
+        framelet_dir = outdir / framelet
+        plot_dir = framelet_dir / "plots"
 
-    for frag_id in sorted(df["fragment_id"].unique()):
-        frag_df = df[df["fragment_id"] == frag_id].reset_index(drop=True)
+        plot_dir.mkdir(parents=True, exist_ok=True)
 
-        frag_out, fig = analyze_fragment(frag_df, args, framelet)
+        augmented = []
 
-        plot_path = plot_dir / f"{framelet}_fragment_{frag_id:04d}_peaks.png"
-        fig.savefig(plot_path, dpi=200)
-        plt.close(fig)
+        for frag_id in sorted(df["fragment_id"].unique()):
+            frag_df = df[df["fragment_id"] == frag_id].reset_index(drop=True)
 
-        augmented.append(frag_out)
+            frag_out, fig = analyze_fragment(frag_df, args, framelet)
 
-    out_df = pd.concat(augmented, ignore_index=True)
-    out_csv = out_dir / f"{framelet}_STAGE6.csv"
-    out_df.to_csv(out_csv, index=False)
+            plot_path = plot_dir / f"{framelet}_fragment_{frag_id:04d}_peaks.png"
+            fig.savefig(plot_path, dpi=200)
+            plt.close(fig)
 
-    print(f"[Stage 6] Completed {framelet}")
-    print(f"  Plots → {plot_dir}")
-    print(f"  CSV   → {out_csv}")
+            augmented.append(frag_out)
+
+        out_df = pd.concat(augmented, ignore_index=True)
+        out_csv = framelet_dir / f"{framelet}_STAGE6.csv"
+        out_df.to_csv(out_csv, index=False)
+
+        print(f"[Stage 6] Completed {framelet}")
+        print(f"  Plots → {plot_dir}")
+        print(f"  CSV   → {out_csv}")
+
+
 
 
 # ============================================================
@@ -267,9 +271,18 @@ def process_csv(csv_path, args):
 # ============================================================
 
 def main():
+    
     args = parse_args()
-    process_csv(Path(args.csv), args)
 
+    indir = Path(args.indir).resolve()
+    outdir = Path(args.outdir).resolve()
+
+    if not indir.exists():
+        raise FileNotFoundError(f"Input directory not found: {indir}")
+
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    process_directory(indir, outdir, args)
 
 if __name__ == "__main__":
     main()
