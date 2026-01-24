@@ -71,7 +71,17 @@ def list_framelets(out_dir: Path, img_name: str) -> list[Path]:
 def spiceinit_offline(cub: Path) -> None:
     # attach=true web=false ckpredicted=true (offline; uses local kernels DBs)
     try:
-        run(["spiceinit", f"from={cub}", "attach=true", "web=false", "ckpredicted=true"])
+        run([
+            "spiceinit",
+            f"from={cub}",
+            "attach=true",
+            "web=false",
+            "ckpredicted=true",
+            f"pck={ENV['ISISDATA']}/base/kernels/pck/pck00010.tpc",
+            "extra=kernels/jupiter_body_code.ti",
+        ])
+
+
     except subprocess.CalledProcessError as e:
         die(f"spiceinit failed on {cub.name}", e)
 
