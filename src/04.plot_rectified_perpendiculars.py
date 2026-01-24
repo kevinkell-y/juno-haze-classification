@@ -540,11 +540,19 @@ def main() -> None:
     # Process
     for mapping_csv in mapping_csvs:
         try:
+            # Pre-flight: ensure rectified image exists
+            stem = mapping_csv.name.replace("_RECTIFIED_MAPPING.csv", "_RECTIFIED")
+            rectified_tif = mapping_csv.parent / f"{stem}.tif"
+            rectified_png = mapping_csv.parent / f"{stem}.png"
+
+            if not rectified_tif.exists() and not rectified_png.exists():
+                print(f"[skip] {mapping_csv.name}: rectified image not found")
+                continue
+
             process_one(mapping_csv, args, outdir, framelet_dir)
+
         except Exception as e:
             print(f"[error] {mapping_csv.name}: {e}")
-
-
 
 
 if __name__ == "__main__":
