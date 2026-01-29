@@ -84,6 +84,20 @@ def analyze_fragment(frag_df, args, framelet_name):
     # Align arrays to delta index space
     dy_d = dy[1:]
     lat_d = lat[1:]
+    
+    # --------------------------------------------------------
+    # PRIMARY limb EDGE (strongest brightness gradient)
+    # --------------------------------------------------------
+    if len(delta) == 0:
+        accepted = False
+        reject_stage = "stage06"
+        reject_reason = "empty_delta"
+        reject_detail = "No ΔBrightness samples"
+        primary_i = None
+    else:
+        # PRIMARY = index of maximum absolute brightness change
+        primary_i = int(np.argmax(np.abs(delta)))
+
 
     # --------------------------------------------------------
     # First SPICE intercept (index in delta-space)
@@ -95,40 +109,6 @@ def analyze_fragment(frag_df, args, framelet_name):
         first_spice_i = len(delta)  # no SPICE at all
 
     # --------------------------------------------------------
-    # Find all ΔBrightness peaks
-    # --------------------------------------------------------
-    peaks, _ = find_peaks(delta)
-
-
-    # --------------------------------------------------------
-    # PRIMARY peak (limb-dominant rule)
-    #   - Search within ±N pixels of first SPICE intercept
-    #   - Choose strongest ΔBrightness peak in that window
-    #   - Must dominate fragment signal
-    # --------------------------------------------------------
-    primary_i = None
-
-    if len(peaks) > 0:
-        # Define limb window
-        lo = max(0, first_spice_i - args.limb_window_px)
-        hi = min(len(delta) - 1, first_spice_i + args.limb_window_px)
-
-        limb_candidates = [p for p in peaks if lo <= p <= hi]
-
-        if limb_candidates:
-            # Pick strongest peak in limb window
-            primary_i = int(
-                limb_candidates[
-                    np.argmax(delta[limb_candidates])
-                ]
-            )
-
-            # Dominance check vs global signal
-            global_max = np.max(delta)
-            if delta[primary_i] < args.min_primary_frac * global_max:
-                primary_i = None
-
-    # --------------------------------------------------------
     # SECONDARY peak (detached haze)
     #   Rules:
     #     - Must be pre-PRIMARY
@@ -138,6 +118,9 @@ def analyze_fragment(frag_df, args, framelet_name):
     secondary_i = None
     best_score = None
 
+    abs_delta = np.abs(delta)
+    peaks, _ = find_peaks(abs_delta)
+    
     if primary_i is not None:
         for p in peaks:
             p = int(p)
@@ -157,32 +140,28 @@ def analyze_fragment(frag_df, args, framelet_name):
             if abs(p - primary_i) > args.max_secondary_sep_px:
                 continue
 
-            # Must be pre-SPICE
-            if p >= first_spice_i:
-                continue
-            
             # Secondary must be reasonably close to limb
             if (primary_i - p) > 0.6 * primary_i:
                 continue
 
             # Absolute brightness floor (kills low-left noise)
-            if delta[p] < args.min_secondary_abs:
+            if abs_delta[p] < args.min_secondary_abs:
                 continue
 
             # Valley (no shoulders)
             lo = min(primary_i, p)
             hi = max(primary_i, p)
 
-            valley = np.min(delta[lo:hi])
-            if delta[p] - valley < 0.06 * delta[primary_i]:
+            valley = np.min(abs_delta[lo:hi])
+            if abs_delta[p] - valley < 0.06 * abs_delta[primary_i]:
                 continue
 
             # Relative amplitude threshold
-            if delta[p] < args.min_secondary_frac * delta[primary_i]:
+            if abs_delta[p] < args.min_secondary_frac * abs_delta[primary_i]:
                 continue
 
             # Score strongest remaining candidate
-            score = delta[p]
+            score = abs_delta[p]
             if best_score is None or score > best_score:
                 best_score = score
                 secondary_i = p
@@ -192,12 +171,26 @@ def analyze_fragment(frag_df, args, framelet_name):
         # NOTE: no_secondary_peak is NOT a rejection
         # This is a valid "no haze detected" outcome
 
+    # --------------------------------------------------------
+    # Limb-crossing sanity check
+    # --------------------------------------------------------
+    valid_limb_crossing = True
+
+    if primary_i is not None and first_spice_i < len(delta):
+        if abs(primary_i - first_spice_i) > args.limb_window_px:
+            valid_limb_crossing = False
+
+    if not valid_limb_crossing:
+        reject_stage = "STAGE6"
+        reject_reason = "no_clear_limb_crossing"
+        reject_detail = "PRIMARY far from SPICE limb"
 
     # --------------------------------------------------------
     # Annotate fragment CSV
     # --------------------------------------------------------
     frag_out = frag_df.copy()
     frag_out["stage6_peak_type"] = ""
+    frag_out["valid_limb_crossing"] = valid_limb_crossing
     frag_out["accepted"] = accepted
     frag_out["reject_stage"] = reject_stage
     frag_out["reject_reason"] = reject_reason
