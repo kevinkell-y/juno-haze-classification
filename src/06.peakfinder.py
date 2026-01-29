@@ -128,6 +128,12 @@ def analyze_fragment(frag_df, args, framelet_name):
             if delta[primary_i] < args.min_primary_frac * global_max:
                 primary_i = None
 
+            # -------- SINGLE EXPLICIT GUARD --------
+            if primary_i is not None and first_spice_i < len(delta):
+                if abs(primary_i - first_spice_i) > args.limb_window_px:
+                    primary_i = None
+
+
     # --------------------------------------------------------
     # SECONDARY peak (detached haze)
     #   Rules:
