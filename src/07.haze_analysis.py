@@ -2,7 +2,7 @@
 """
 Stage 7 — Aggregate Stage 6 peak classifications across fragments/framelets,
 and evaluate detached haze occurrence as a function of latitude using the
-first-available SPICE latitude per fragment.
+SPICE latitude at the detected limb crossing (PRIMARY peak).
 
 Inputs:
   - *_STAGE6.csv files produced by src/06.peakfinder.py
@@ -85,16 +85,16 @@ def parse_args() -> argparse.Namespace:
     )
     return ap.parse_args()
 
-
 @dataclass
 class FragmentRecord:
     framelet: str
     fragment_id: int
     n_samples: int
-    first_spice_i: int | None
-    first_spice_lat: float | None
+    limb_lat: float | None
+    lat_source: str              # "primary", "nearest_spice", "none"
     has_secondary: bool
     secondary_count: int
+    first_spice_lat: float | None
 
 
 def infer_framelet_name(stage6_csv: Path) -> str:
@@ -137,6 +137,24 @@ def build_fragment_table(stage6_csvs: list[Path], lat_col: str, peak_col: str) -
     for csv_path in stage6_csvs:
         df = pd.read_csv(csv_path)
 
+        if "accepted" not in df.columns:
+            raise KeyError(
+                f"{csv_path} missing 'accepted' column — rerun Stage 6 with rejection schema"
+            )
+
+        # Keep accepted fragments that are NOT rejected.
+        # NOTE: reject_reason may be NaN (not ""), so normalize it.
+        rej = df["reject_reason"].fillna("").astype(str)
+
+        df = df[
+            (df["accepted"] == True) &
+            (rej == "")
+        ].reset_index(drop=True)
+
+        if df.empty:
+            print(f"[warn] {csv_path.name}: no accepted fragments after filtering")
+            continue
+
         if "fragment_id" not in df.columns:
             raise KeyError(f"{csv_path} missing required column 'fragment_id'")
 
@@ -150,6 +168,36 @@ def build_fragment_table(stage6_csvs: list[Path], lat_col: str, peak_col: str) -
 
         for frag_id in sorted(df["fragment_id"].unique()):
             frag = df[df["fragment_id"] == frag_id].reset_index(drop=True)
+
+            # --------------------------------------------------
+            # Determine limb-associated SPICE latitude
+            # Priority:
+            #   1) PRIMARY-row SPICE latitude
+            #   2) Nearest SPICE-valid row to PRIMARY index
+            # --------------------------------------------------
+            primary_rows = frag[frag[peak_col] == "PRIMARY"]
+
+            limb_lat = None
+            lat_source = "none"
+
+            if len(primary_rows) == 1:
+                primary_idx = primary_rows.index[0]
+                primary_lat = primary_rows[lat_col].iloc[0]
+
+                if np.isfinite(primary_lat):
+                    limb_lat = float(primary_lat)
+                    lat_source = "primary"
+                else:
+                    # Fallback to nearest SPICE-valid row
+                    lat_vals = frag[lat_col].to_numpy(dtype=float)
+                    finite_idx = np.where(np.isfinite(lat_vals))[0]
+
+                    if len(finite_idx) > 0:
+                        nearest = finite_idx[np.argmin(np.abs(finite_idx - primary_idx))]
+                        limb_lat = float(lat_vals[nearest])
+                        lat_source = "nearest_spice"
+
+                        
 
             lat = frag[lat_col].to_numpy(dtype=float)
             first_i = first_finite_index(lat)
@@ -167,11 +215,13 @@ def build_fragment_table(stage6_csvs: list[Path], lat_col: str, peak_col: str) -
                 framelet=framelet,
                 fragment_id=int(frag_id),
                 n_samples=int(len(frag)),
-                first_spice_i=first_i,
-                first_spice_lat=first_lat,
+                limb_lat=limb_lat,
+                lat_source=lat_source,
                 has_secondary=bool(sec_count > 0),
                 secondary_count=sec_count,
+                first_spice_lat=first_lat,
             )
+
             records.append(rec)
 
     out = pd.DataFrame([r.__dict__ for r in records])
@@ -181,28 +231,32 @@ def build_fragment_table(stage6_csvs: list[Path], lat_col: str, peak_col: str) -
 def bin_latitudes(df_frag: pd.DataFrame, bin_width: float, min_n: int) -> pd.DataFrame:
     work = df_frag.copy()
 
-    # Drop fragments without any SPICE latitude at all (can’t place on x-axis)
-    work = work[np.isfinite(work["first_spice_lat"].astype(float, errors="ignore"))].copy()
-    work["first_spice_lat"] = work["first_spice_lat"].astype(float)
+    work = work[
+        (work["lat_source"] != "none") &
+        np.isfinite(work["limb_lat"].astype(float, errors="ignore"))
+    ].copy()
+
+
+    work["limb_lat"] = work["limb_lat"].astype(float)
 
     if len(work) == 0:
-        raise RuntimeError("No fragments had a finite first_spice_lat; cannot bin.")
+        raise RuntimeError("No fragments had a finite limb_lat; cannot bin.")
 
     # Bin edges
-    lat_min = math.floor(work["first_spice_lat"].min() / bin_width) * bin_width
-    lat_max = math.ceil(work["first_spice_lat"].max() / bin_width) * bin_width
+    lat_min = math.floor(work["limb_lat"].min() / bin_width) * bin_width
+    lat_max = math.ceil(work["limb_lat"].max() / bin_width) * bin_width
     edges = np.arange(lat_min, lat_max + bin_width, bin_width)
 
-    work["lat_bin"] = pd.cut(work["first_spice_lat"], bins=edges, include_lowest=True)
+    work["lat_bin"] = pd.cut(work["limb_lat"], bins=edges, include_lowest=True)
 
     grouped = work.groupby("lat_bin", observed=True)
     summary = grouped.agg(
         n_fragments=("has_secondary", "size"),
         n_with_secondary=("has_secondary", "sum"),
         frac_with_secondary=("has_secondary", "mean"),
-        lat_center=("first_spice_lat", "mean"),
-        lat_min=("first_spice_lat", "min"),
-        lat_max=("first_spice_lat", "max"),
+        lat_center=("limb_lat", "mean"),
+        lat_min=("limb_lat", "min"),
+        lat_max=("limb_lat", "max"),
     ).reset_index()
 
     summary["low_n_flag"] = summary["n_fragments"] < int(min_n)
@@ -228,9 +282,9 @@ def plot_occurrence(summary: pd.DataFrame, out_png: Path, img_label: str | None 
     ax.plot(x, y, marker="o")
     ax.vlines(x, ylo, yhi)
 
-    ax.set_xlabel("First-available SPICE Planetocentric Latitude (deg)")
+    ax.set_xlabel("Planetocentric Latitude at Limb Crossing (deg)")
     ax.set_ylabel("Fraction of fragments with SECONDARY peak")
-    ax.set_title("Detached haze occurrence (proxy-binned by first SPICE latitude)")
+    ax.set_title("Detached haze occurrence binned by limb-crossing latitude")
     
     if img_label:
         ax.text(
