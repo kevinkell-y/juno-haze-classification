@@ -157,6 +157,7 @@ def summarize_fragment(
 
         "first_valid_slant_distance_km": first_slant,
         "median_slant_distance_km": median_slant,
+        "representative_slant_distance_km": rep_slant,
         "first_valid_spacecraft_altitude_km": first_alt,
         "median_spacecraft_altitude_km": median_alt,
 
@@ -223,11 +224,11 @@ def compute_binned_median(
     return np.array(centers), np.array(medians)
 
 def plot_detectability_vs_lat(df: pd.DataFrame, out_png: Path) -> None:
-    if "median_planetocentric_latitude_deg" not in df.columns:
+    if "first_valid_planetocentric_latitude_deg" not in df.columns:
         return
 
     plot_df = df.dropna(
-        subset=["median_planetocentric_latitude_deg", "pixels_per_detachment"]
+        subset=["first_valid_planetocentric_latitude_deg", "pixels_per_detachment"]
     ).copy()
     if plot_df.empty:
         return
@@ -236,14 +237,15 @@ def plot_detectability_vs_lat(df: pd.DataFrame, out_png: Path) -> None:
     detectable = plot_df["detectability_flag"] == True
 
     plt.scatter(
-        plot_df.loc[~detectable, "median_planetocentric_latitude_deg"],
+        plot_df.loc[~detectable, "first_valid_planetocentric_latitude_deg"],
         plot_df.loc[~detectable, "pixels_per_detachment"],
         s=18,
         alpha=0.5,
         label="Non-detectable fragments",
     )
+    
     plt.scatter(
-        plot_df.loc[detectable, "median_planetocentric_latitude_deg"],
+        plot_df.loc[detectable, "first_valid_planetocentric_latitude_deg"],
         plot_df.loc[detectable, "pixels_per_detachment"],
         s=18,
         alpha=0.5,
@@ -252,10 +254,11 @@ def plot_detectability_vs_lat(df: pd.DataFrame, out_png: Path) -> None:
 
     # Binned median trend
     bin_centers, bin_medians = compute_binned_median(
-        plot_df["median_planetocentric_latitude_deg"],
+        plot_df["first_valid_planetocentric_latitude_deg"],
         plot_df["pixels_per_detachment"],
         bin_width=2.0,
     )
+
     if len(bin_centers) > 0:
         plt.plot(
             bin_centers,
@@ -281,7 +284,7 @@ def plot_detectability_vs_lat(df: pd.DataFrame, out_png: Path) -> None:
 
 def plot_km_per_pixel_vs_slant(df: pd.DataFrame, out_png: Path) -> None:
     plot_df = df.dropna(
-        subset=["first_valid_slant_distance_km", "km_per_pixel_at_limb"]
+        subset=["representative_slant_distance_km", "km_per_pixel_at_limb"]
     ).copy()
     if plot_df.empty:
         return
@@ -290,14 +293,15 @@ def plot_km_per_pixel_vs_slant(df: pd.DataFrame, out_png: Path) -> None:
     detectable = plot_df["detectability_flag"] == True
 
     plt.scatter(
-        plot_df.loc[~detectable, "first_valid_slant_distance_km"],
+        plot_df.loc[~detectable, "representative_slant_distance_km"],
         plot_df.loc[~detectable, "km_per_pixel_at_limb"],
         s=18,
         alpha=0.5,
         label="Non-detectable fragments",
     )
+
     plt.scatter(
-        plot_df.loc[detectable, "first_valid_slant_distance_km"],
+        plot_df.loc[detectable, "representative_slant_distance_km"],
         plot_df.loc[detectable, "km_per_pixel_at_limb"],
         s=18,
         alpha=0.5,
@@ -306,10 +310,11 @@ def plot_km_per_pixel_vs_slant(df: pd.DataFrame, out_png: Path) -> None:
     
     # Binned median trend
     bin_centers, bin_medians = compute_binned_median(
-        plot_df["first_valid_slant_distance_km"],
+        plot_df["representative_slant_distance_km"],
         plot_df["km_per_pixel_at_limb"],
         bin_width=1000.0,
     )
+    
     if len(bin_centers) > 0:
         plt.plot(
             bin_centers,
