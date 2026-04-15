@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
                     help="Perijove-scoped root directory containing IMG dirs.")
 
     ap.add_argument("--stage7-glob", type=str,
-                    default="analysis/*/stage_07/stage7_fragment_table.csv",
+                    default="**/stage_07/stage7_fragment_table.csv",
                     help="Glob under --pjdir to find Stage 7 fragment tables.")
 
     ap.add_argument("--stage6-glob", type=str,
@@ -62,7 +62,7 @@ def parse_args() -> argparse.Namespace:
                     help="Glob under --pjdir to find Stage 6 per-sample CSVs.")
 
     ap.add_argument("--outdir", type=str, default=None,
-                    help="Output dir. Default: <pjdir>/analysis/stage_08")
+                    help="Output dir. Default: <pjdir>/analysis/PJ14_stage_08_perijove_analysis")
 
     ap.add_argument("--pj-label", type=str, default=None,
                     help="Label stamped on plots, e.g. 'Perijove 14'.")
@@ -99,22 +99,21 @@ def parse_args() -> argparse.Namespace:
 def infer_img_id_from_path(stage7_path: Path) -> str:
     """
     Infer IMG ID from:
-      <IMGDIR>/analysis/stage_07/stage7_fragment_table.csv
+      <PJDIR>/analysis/<IMGDIR>/stage_07/stage7_fragment_table.csv
     """
-    parts = stage7_path.parts  # these are STRINGS already
+    parts = stage7_path.parts
 
     try:
         idx = parts.index("analysis")
-        if idx > 0:
-            return parts[idx - 1]
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
     except ValueError:
         pass
 
-    # Fallback (robust for minor layout differences)
     if stage7_path.parent.name == "stage_07":
-        return stage7_path.parent.parent.parent.name  # IMGDIR
-    return stage7_path.parent.name
+        return stage7_path.parent.parent.name
 
+    return stage7_path.parent.name
 
 def infer_framelet_name(stage6_csv: Path) -> str:
     # Stage 6 naming: "<FRAMELET>_STAGE6.csv"
@@ -162,7 +161,7 @@ def load_stage7_all(pjdir: Path, stage7_glob: str, img_id_col: str) -> pd.DataFr
 
     frames = []
     for p in paths:
-        df = pd.read_csv(p)
+        df = pd.read_csv(p, low_memory=False)
 
         required = ["framelet", "fragment_id", "has_secondary"]
         missing = [c for c in required if c not in df.columns]
@@ -257,7 +256,7 @@ def load_stage6_geom_index(
 
     records = []
     for p in paths:
-        df = pd.read_csv(p)
+        df = pd.read_csv(p, low_memory=False)
 
         # NOTE:
         # Stage 08 does NOT filter on 'accepted' or 'reject_reason'.
@@ -531,7 +530,7 @@ def plot_lonlat_map(
 def main() -> None:
     args = parse_args()
     pjdir = Path(args.pjdir).resolve()
-    outdir = Path(args.outdir).resolve() if args.outdir else (pjdir / "analysis" / "stage_08")
+    outdir = Path(args.outdir).resolve() if args.outdir else (pjdir / "analysis" / "PJ14_stage_08_perijove_analysis")
     outdir.mkdir(parents=True, exist_ok=True)
 
     # Load Stage 7
