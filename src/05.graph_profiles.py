@@ -223,7 +223,7 @@ def main():
             csv_paths = [cands[0]]  # quick smoke test
 
     for csv_path in csv_paths:
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(csv_path, low_memory=False)
         missing = REQUIRED_COLS - set(df.columns)
         if missing:
             raise RuntimeError(f"Missing required columns: {sorted(missing)}")
@@ -258,6 +258,18 @@ def main():
             if have_lat_col:
                 frag[lat_col] = pd.to_numeric(frag[lat_col], errors="coerce")
                 lat = frag[lat_col].to_numpy(float)
+            
+            # Determine once whether latitude labeling is usable
+            lat_labels_ok = False
+            if lat is not None:
+                lat_labels_ok = np.isfinite(lat[1:]).sum() >= 3
+
+            if not lat_labels_ok:
+                print(
+                    f"[WARN] fragment {frag_id:04d}: latitude labels unavailable/insufficient; "
+                    f"falling back to dy axis.",
+                    file=sys.stderr,
+                )
 
             # ΔBrightness (RAW) in dy-space
             d_raw = np.diff(brightness)
@@ -278,18 +290,10 @@ def main():
             ax.set_title(f"{stem} — fragment {frag_id:04d} — RAW")
             ax.set_ylabel("ΔBrightness")
 
-            used_lat_labels = False
-            if lat is not None:
-                # align latitude to dy_raw (drop first to match diff)
-                used_lat_labels = apply_latitude_ticks(ax, dy_raw, lat[1:])
-
-            if not used_lat_labels:
+            if lat_labels_ok:
+                apply_latitude_ticks(ax, dy_raw, lat[1:])
+            else:
                 ax.set_xlabel("dy (pixels)")
-                print(
-                    f"[WARN] fragment {frag_id:04d}: latitude labels unavailable/insufficient; "
-                    f"falling back to dy axis.",
-                    file=sys.stderr,
-                )
 
             fig.tight_layout()
             fig.savefig(outdir / f"{stem}_frag{frag_id:04d}_RAW_delta.png", dpi=args.dpi)
@@ -301,17 +305,10 @@ def main():
             ax.set_title(f"{stem} — fragment {frag_id:04d} — SMOOTH")
             ax.set_ylabel("ΔBrightness")
 
-            used_lat_labels = False
-            if lat is not None:
-                used_lat_labels = apply_latitude_ticks(ax, dy_sm, lat[1:])
-
-            if not used_lat_labels:
+            if lat_labels_ok:
+                apply_latitude_ticks(ax, dy_sm, lat[1:])
+            else:
                 ax.set_xlabel("dy (pixels)")
-                print(
-                    f"[WARN] fragment {frag_id:04d}: latitude labels unavailable/insufficient; "
-                    f"falling back to dy axis.",
-                    file=sys.stderr,
-                )
 
             fig.tight_layout()
             fig.savefig(outdir / f"{stem}_frag{frag_id:04d}_SMOOTH_delta.png", dpi=args.dpi)
