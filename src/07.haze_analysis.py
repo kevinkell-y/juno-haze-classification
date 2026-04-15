@@ -19,6 +19,11 @@ Scientific role of Stage 7:
   - IMPORTANT: include only fragments with detectability_flag == True,
     so occurrence statistics are computed only from geometrically valid,
     detectable observations
+
+Graceful-failure behavior added:
+  - If no accepted/detectable fragments exist, Stage 7 does NOT crash
+  - It writes outputs anyway, including an empty/diagnostic bin table
+  - It produces a diagnostic plot explaining why no binned result exists
 """
 
 from __future__ import annotations
@@ -163,7 +168,7 @@ def first_finite_index(x: np.ndarray) -> int | None:
     finite = np.isfinite(x)
     if not finite.any():
         return None
-    return int(np.argmax(finite))  # first True
+    return int(np.argmax(finite))
 
 
 def normalize_bool_series(s: pd.Series) -> pd.Series:
@@ -202,7 +207,14 @@ def require_columns(df: pd.DataFrame, csv_path: Path, cols: list[str]) -> None:
         raise KeyError(f"{csv_path} missing required columns: {missing}")
 
 
-def summarize_detectability_for_fragment(frag: pd.DataFrame, csv_path: Path) -> tuple[bool | None, str | None, float | None, float | None, float | None]:
+def safe_float_series(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+
+def summarize_detectability_for_fragment(
+    frag: pd.DataFrame,
+    csv_path: Path
+) -> tuple[bool | None, str | None, float | None, float | None, float | None]:
     """
     Extract fragment-level detectability provenance from a Stage 6 fragment.
 
@@ -220,33 +232,31 @@ def summarize_detectability_for_fragment(frag: pd.DataFrame, csv_path: Path) -> 
     require_columns(frag, csv_path, required)
 
     det_flag = normalize_bool_series(frag["detectability_flag"])
-    det_reason = frag["detectability_reason"].astype(str)
+    det_reason = frag["detectability_reason"]
 
-    # Consistency checks within the fragment
     unique_flag = pd.unique(det_flag.dropna())
     if len(unique_flag) > 1:
         raise RuntimeError(
-            f"{csv_path.name} fragment {int(frag['fragment_id'].iloc[0])} has inconsistent detectability_flag values"
+            f"{csv_path.name} fragment {int(frag['fragment_id'].iloc[0])} "
+            "has inconsistent detectability_flag values"
         )
 
-    unique_reason = pd.unique(det_reason.fillna(""))
+    reason_clean = det_reason.where(~det_reason.isna(), None)
+    unique_reason = pd.unique(pd.Series(reason_clean).fillna(""))
     if len(unique_reason) > 1:
         raise RuntimeError(
-            f"{csv_path.name} fragment {int(frag['fragment_id'].iloc[0])} has inconsistent detectability_reason values"
+            f"{csv_path.name} fragment {int(frag['fragment_id'].iloc[0])} "
+            "has inconsistent detectability_reason values"
         )
 
     def first_finite(colname: str) -> float | None:
-        vals = pd.to_numeric(frag[colname], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        vals = safe_float_series(frag[colname]).dropna()
         if len(vals) == 0:
             return None
         return float(vals.iloc[0])
 
-    if len(unique_flag) == 0:
-        flag_val = None
-    else:
-        flag_val = bool(unique_flag[0])
-
-    reason_val = None if len(unique_reason) == 0 else str(unique_reason[0])
+    flag_val = None if len(unique_flag) == 0 else bool(unique_flag[0])
+    reason_val = None if len(unique_reason) == 0 or unique_reason[0] == "" else str(unique_reason[0])
 
     return (
         flag_val,
@@ -257,6 +267,46 @@ def summarize_detectability_for_fragment(frag: pd.DataFrame, csv_path: Path) -> 
     )
 
 
+def empty_bins_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=[
+        "lat_bin",
+        "n_fragments",
+        "n_with_secondary",
+        "frac_with_secondary",
+        "lat_center",
+        "lat_min",
+        "lat_max",
+        "low_n_flag",
+        "frac_ci95_lo",
+        "frac_ci95_hi",
+        "status",
+        "note",
+    ])
+
+
+def count_statuses(df_frag: pd.DataFrame) -> dict[str, int]:
+    if df_frag.empty:
+        return {
+            "total_fragments": 0,
+            "detectable_fragments": 0,
+            "finite_limb_lat_fragments": 0,
+        }
+
+    detectable = int((normalize_bool_series(df_frag["detectability_flag"]) == True).sum())
+    finite_limb = int(
+        (
+            (df_frag["lat_source"].astype(str) != "none") &
+            np.isfinite(safe_float_series(df_frag["limb_lat"]))
+        ).sum()
+    )
+
+    return {
+        "total_fragments": int(len(df_frag)),
+        "detectable_fragments": detectable,
+        "finite_limb_lat_fragments": finite_limb,
+    }
+
+
 # ============================================================
 # Core Stage 7 aggregation
 # ============================================================
@@ -265,23 +315,20 @@ def build_fragment_table(stage6_csvs: list[Path], lat_col: str, peak_col: str) -
     """
     Build one fragment-level record per usable Stage 6 fragment.
 
-    The filtering logic is the key scientific change:
+    Rules:
       1) fragment must be accepted
       2) fragment must not carry a rejection reason
-      3) fragment must have detectability_flag == True
+      3) fragment must have detectability_flag == True to contribute to Stage 7 stats
 
-    This is what makes Stage 7 occurrence statistics 'quantifiably defensible':
-    non-detections are only counted if the fragment was geometrically capable
-    of resolving detached haze in the first place.
+    We still write the fragment table even if nothing survives to binning.
     """
     records: list[FragmentRecord] = []
 
     for csv_path in stage6_csvs:
         df = pd.read_csv(csv_path)
 
-        require_columns(df, csv_path, ["fragment_id", "accepted", peak_col, lat_col])
+        require_columns(df, csv_path, ["fragment_id", "accepted", "reject_reason", peak_col, lat_col])
 
-        # Stage 6 fragment acceptance / rejection filter
         rej = df["reject_reason"].fillna("").astype(str)
         accepted = normalize_bool_series(df["accepted"])
 
@@ -299,9 +346,6 @@ def build_fragment_table(stage6_csvs: list[Path], lat_col: str, peak_col: str) -
         for frag_id in sorted(df["fragment_id"].unique()):
             frag = df[df["fragment_id"] == frag_id].reset_index(drop=True)
 
-            # --------------------------------------------------
-            # Stage 4b/6 detectability filter
-            # --------------------------------------------------
             (
                 detectability_flag,
                 detectability_reason,
@@ -310,32 +354,23 @@ def build_fragment_table(stage6_csvs: list[Path], lat_col: str, peak_col: str) -
                 pixels_per_detachment,
             ) = summarize_detectability_for_fragment(frag, csv_path)
 
-            # Scientific rule:
-            # only geometrically detectable fragments contribute to Stage 7
             if detectability_flag is not True:
                 continue
 
-            # --------------------------------------------------
-            # Determine limb-associated SPICE latitude
-            # Priority:
-            #   1) PRIMARY-row SPICE latitude
-            #   2) Nearest SPICE-valid row to PRIMARY index
-            # --------------------------------------------------
             primary_rows = frag[frag[peak_col] == "PRIMARY"]
 
             limb_lat = None
             lat_source = "none"
 
-            if len(primary_rows) == 1:
+            if len(primary_rows) >= 1:
                 primary_idx = primary_rows.index[0]
-                primary_lat = pd.to_numeric(primary_rows[lat_col], errors="coerce").iloc[0]
+                primary_lat = safe_float_series(primary_rows[lat_col]).iloc[0]
 
-                if np.isfinite(primary_lat):
+                if pd.notna(primary_lat):
                     limb_lat = float(primary_lat)
                     lat_source = "primary"
                 else:
-                    # Fallback to nearest SPICE-valid row
-                    lat_vals = pd.to_numeric(frag[lat_col], errors="coerce").to_numpy(dtype=float)
+                    lat_vals = safe_float_series(frag[lat_col]).to_numpy(dtype=float)
                     finite_idx = np.where(np.isfinite(lat_vals))[0]
 
                     if len(finite_idx) > 0:
@@ -343,19 +378,12 @@ def build_fragment_table(stage6_csvs: list[Path], lat_col: str, peak_col: str) -
                         limb_lat = float(lat_vals[nearest])
                         lat_source = "nearest_spice"
 
-            # Retain first finite SPICE latitude for auditability / comparison
-            lat = pd.to_numeric(frag[lat_col], errors="coerce").to_numpy(dtype=float)
+            lat = safe_float_series(frag[lat_col]).to_numpy(dtype=float)
             first_i = first_finite_index(lat)
+            first_lat = None if first_i is None else float(lat[first_i])
 
-            if first_i is None:
-                first_lat = None
-            else:
-                first_lat = float(lat[first_i])
-
-            # Count SECONDARY peaks
             peak_types = frag[peak_col].astype(str).to_numpy()
-            sec_mask = peak_types == "SECONDARY"
-            sec_count = int(sec_mask.sum())
+            sec_count = int((peak_types == "SECONDARY").sum())
 
             rec = FragmentRecord(
                 framelet=framelet,
@@ -375,30 +403,81 @@ def build_fragment_table(stage6_csvs: list[Path], lat_col: str, peak_col: str) -
             records.append(rec)
 
     out = pd.DataFrame([r.__dict__ for r in records])
+
+    if out.empty:
+        out = pd.DataFrame(columns=[
+            "framelet",
+            "fragment_id",
+            "n_samples",
+            "limb_lat",
+            "lat_source",
+            "has_secondary",
+            "secondary_count",
+            "first_spice_lat",
+            "detectability_flag",
+            "detectability_reason",
+            "first_valid_slant_distance_km",
+            "km_per_pixel_at_limb",
+            "pixels_per_detachment",
+        ])
+
     return out
 
 
-def bin_latitudes(df_frag: pd.DataFrame, bin_width: float, min_n: int) -> pd.DataFrame:
+def bin_latitudes(df_frag: pd.DataFrame, bin_width: float, min_n: int) -> tuple[pd.DataFrame, str]:
     """
     Bin fragment-level detached-haze occurrence by limb-crossing latitude.
 
-    Only fragments with a valid Stage 7 limb latitude are binned.
+    Returns:
+      (summary_df, status_string)
+
+    status_string:
+      - "ok"
+      - "no_fragments"
+      - "no_finite_limb_lat"
     """
+    if df_frag.empty:
+        summary = empty_bins_df()
+        summary.loc[len(summary)] = {
+            "status": "no_fragments",
+            "note": "No accepted + detectable Stage 7 fragments were available."
+        }
+        return summary, "no_fragments"
+
     work = df_frag.copy()
+    work["limb_lat"] = safe_float_series(work["limb_lat"])
 
     work = work[
-        (work["lat_source"] != "none") &
-        np.isfinite(pd.to_numeric(work["limb_lat"], errors="coerce"))
+        (work["lat_source"].astype(str) != "none") &
+        np.isfinite(work["limb_lat"])
     ].copy()
 
-    work["limb_lat"] = pd.to_numeric(work["limb_lat"], errors="coerce")
-
     if len(work) == 0:
-        raise RuntimeError("No fragments had a finite limb_lat; cannot bin.")
+        summary = empty_bins_df()
+        summary.loc[len(summary)] = {
+            "status": "no_finite_limb_lat",
+            "note": "Fragments existed, but none had a finite limb latitude for binning."
+        }
+        return summary, "no_finite_limb_lat"
 
     lat_min = math.floor(work["limb_lat"].min() / bin_width) * bin_width
     lat_max = math.ceil(work["limb_lat"].max() / bin_width) * bin_width
+
+    if not np.isfinite(lat_min) or not np.isfinite(lat_max):
+        summary = empty_bins_df()
+        summary.loc[len(summary)] = {
+            "status": "no_finite_limb_lat",
+            "note": "Latitude min/max was non-finite after filtering."
+        }
+        return summary, "no_finite_limb_lat"
+
+    if lat_min == lat_max:
+        lat_max = lat_min + bin_width
+
     edges = np.arange(lat_min, lat_max + bin_width, bin_width)
+
+    if len(edges) < 2:
+        edges = np.array([lat_min, lat_min + bin_width], dtype=float)
 
     work["lat_bin"] = pd.cut(work["limb_lat"], bins=edges, include_lowest=True)
 
@@ -414,32 +493,74 @@ def bin_latitudes(df_frag: pd.DataFrame, bin_width: float, min_n: int) -> pd.Dat
 
     summary["low_n_flag"] = summary["n_fragments"] < int(min_n)
 
-    # Approximate 95% CI for a proportion (normal approximation)
     p = summary["frac_with_secondary"].to_numpy(float)
     n = summary["n_fragments"].to_numpy(float)
     se = np.sqrt(np.clip(p * (1 - p) / np.maximum(n, 1.0), 0, np.inf))
     summary["frac_ci95_lo"] = np.clip(p - 1.96 * se, 0, 1)
     summary["frac_ci95_hi"] = np.clip(p + 1.96 * se, 0, 1)
+    summary["status"] = "ok"
+    summary["note"] = ""
 
-    return summary
+    return summary, "ok"
 
 
-def plot_occurrence(summary: pd.DataFrame, out_png: Path, img_label: str | None = None) -> None:
+def plot_occurrence(
+    summary: pd.DataFrame,
+    out_png: Path,
+    img_label: str | None = None,
+    status: str = "ok",
+    frag_counts: dict[str, int] | None = None,
+) -> None:
     """
     Plot detached haze occurrence fraction vs limb-crossing latitude.
+
+    If no usable binned result exists, create a diagnostic plot instead of crashing.
     """
-    x = summary["lat_center"].to_numpy(float)
-    y = summary["frac_with_secondary"].to_numpy(float)
-    ylo = summary["frac_ci95_lo"].to_numpy(float)
-    yhi = summary["frac_ci95_hi"].to_numpy(float)
-
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(x, y, marker="o")
-    ax.vlines(x, ylo, yhi)
 
-    ax.set_xlabel("Planetocentric Latitude at Limb Crossing (deg)")
-    ax.set_ylabel("Fraction of fragments with SECONDARY peak")
-    ax.set_title("Detached haze occurrence binned by limb-crossing latitude")
+    if status == "ok" and not summary.empty:
+        x = pd.to_numeric(summary["lat_center"], errors="coerce").to_numpy(float)
+        y = pd.to_numeric(summary["frac_with_secondary"], errors="coerce").to_numpy(float)
+        ylo = pd.to_numeric(summary["frac_ci95_lo"], errors="coerce").to_numpy(float)
+        yhi = pd.to_numeric(summary["frac_ci95_hi"], errors="coerce").to_numpy(float)
+
+        ax.plot(x, y, marker="o")
+        ax.vlines(x, ylo, yhi)
+
+        ax.set_xlabel("Planetocentric Latitude at Limb Crossing (deg)")
+        ax.set_ylabel("Fraction of fragments with SECONDARY peak")
+        ax.set_title("Detached haze occurrence binned by limb-crossing latitude")
+
+        low_n = summary["low_n_flag"].astype(bool).to_numpy()
+        if low_n.any():
+            ax.scatter(x[low_n], y[low_n], marker="x", s=120)
+
+    else:
+        ax.axis("off")
+
+        lines = ["Stage 7 diagnostic"]
+
+        if status == "no_fragments":
+            lines.append("No accepted + detectable fragments were available.")
+        elif status == "no_finite_limb_lat":
+            lines.append("Fragments existed, but none had a finite limb latitude for binning.")
+        else:
+            lines.append("No plottable Stage 7 result was available.")
+
+        if frag_counts:
+            lines.append("")
+            lines.append(f"Accepted + detectable fragments: {frag_counts.get('total_fragments', 0)}")
+            lines.append(f"Finite limb-lat fragments: {frag_counts.get('finite_limb_lat_fragments', 0)}")
+
+        ax.text(
+            0.5,
+            0.55,
+            "\n".join(lines),
+            ha="center",
+            va="center",
+            fontsize=13,
+            transform=ax.transAxes,
+        )
 
     if img_label:
         ax.text(
@@ -452,11 +573,6 @@ def plot_occurrence(summary: pd.DataFrame, out_png: Path, img_label: str | None 
             color="#071ecd",
             alpha=1
         )
-
-    # Mark low-N bins
-    low_n = summary["low_n_flag"].to_numpy(bool)
-    if low_n.any():
-        ax.scatter(x[low_n], y[low_n], marker="x", s=120)
 
     fig.tight_layout()
     fig.savefig(out_png, dpi=200)
@@ -471,7 +587,6 @@ def main() -> None:
     args = parse_args()
 
     imgdir = Path(args.imgdir).resolve()
-
     stage6_root = Path(args.stage6_root).resolve() if args.stage6_root else (imgdir / "cub" / "stage_06_peaks")
     outdir = Path(args.outdir).resolve() if args.outdir else (imgdir / "analysis" / "stage_07")
 
@@ -486,23 +601,40 @@ def main() -> None:
     frag_out = outdir / "stage7_fragment_table.csv"
     df_frag.to_csv(frag_out, index=False)
 
-    df_bins = bin_latitudes(
+    df_bins, bin_status = bin_latitudes(
         df_frag,
         bin_width=float(args.bin_width_deg),
         min_n=int(args.min_fragments_per_bin)
     )
+
     bins_out = outdir / "stage7_latitude_bins.csv"
     df_bins.to_csv(bins_out, index=False)
 
     img_label = args.img_label or infer_img_label_from_stage6(stage6_csvs)
+    frag_counts = count_statuses(df_frag)
 
     plot_path = outdir / "stage7_occurrence_by_lat.png"
-    plot_occurrence(df_bins, plot_path, img_label=img_label)
+    plot_occurrence(
+        df_bins,
+        plot_path,
+        img_label=img_label,
+        status=bin_status,
+        frag_counts=frag_counts,
+    )
 
     print("[Stage 7] Complete")
     print(f"  Fragment table → {frag_out}")
     print(f"  Bin summary    → {bins_out}")
     print(f"  Plot           → {plot_path}")
+
+    if bin_status == "ok":
+        print("[Stage 7] Status: OK")
+    elif bin_status == "no_fragments":
+        print("[Stage 7] Status: NO BINNABLE FRAGMENTS")
+        print("  No accepted + detectable fragments survived to Stage 7 binning.")
+    elif bin_status == "no_finite_limb_lat":
+        print("[Stage 7] Status: NO FINITE LIMB LATITUDES")
+        print("  Fragments survived, but none had finite limb latitude for Stage 7 binning.")
 
 
 if __name__ == "__main__":
