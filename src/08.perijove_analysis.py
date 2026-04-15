@@ -54,11 +54,11 @@ def parse_args() -> argparse.Namespace:
                     help="Perijove-scoped root directory containing IMG dirs.")
 
     ap.add_argument("--stage7-glob", type=str,
-                    default="**/analysis/stage_07/stage7_fragment_table.csv",
+                    default="analysis/*/stage_07/stage7_fragment_table.csv",
                     help="Glob under --pjdir to find Stage 7 fragment tables.")
 
     ap.add_argument("--stage6-glob", type=str,
-                    default="**/cub/stage_06_peaks/**/*_STAGE6.csv",
+                    default="cub/*/stage_06_peaks/**/*_STAGE6.csv",
                     help="Glob under --pjdir to find Stage 6 per-sample CSVs.")
 
     ap.add_argument("--outdir", type=str, default=None,
