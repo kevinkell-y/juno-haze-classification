@@ -360,7 +360,14 @@ def analyze_fragment(frag_df, args, framelet_name):
     ax.set_xticklabels(labels, rotation=30)
     ax.set_xlabel("Planetocentric Latitude (deg) — NaN = no SPICE")
 
-    ax.legend()
+    handles, labels = ax.get_legend_handles_labels()
+    frag_id = int(frag_df["fragment_id"].iloc[0])
+
+    if handles:
+        ax.legend()
+    else:
+        print(f"[INFO] fragment {frag_id:04d}: no peaks passed thresholds")
+
     fig.tight_layout()
 
     return frag_out, fig
@@ -389,7 +396,15 @@ def process_directory(indir: Path, outdir: Path, args):
 
         augmented = []
 
-        for frag_id in sorted(df["fragment_id"].unique()):
+        frag_ids = sorted(df["fragment_id"].unique())
+        total_frags = len(frag_ids)
+
+        print(f"[Stage 6] {framelet}: {total_frags} fragments")
+
+        for j, frag_id in enumerate(frag_ids, start=1):
+            if j == 1 or j % 50 == 0 or j == total_frags:
+                print(f"[Stage 6] {framelet}: fragment {j}/{total_frags}")
+
             frag_df = df[df["fragment_id"] == frag_id].reset_index(drop=True)
 
             frag_out, fig = analyze_fragment(frag_df, args, framelet)
