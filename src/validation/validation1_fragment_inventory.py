@@ -97,20 +97,92 @@ def main():
     out = pd.DataFrame(records).sort_values("img_id")
     out.to_csv(outdir / "validation1_img_inventory.csv", index=False)
 
-    # Simple diagnostic plot
-    fig, ax = plt.subplots(figsize=(12, 6))
-    x = np.arange(len(out))
-    ax.bar(x, out["n_stage6_fragments"], label="Stage 6 fragments")
-    ax.plot(x, out["n_stage7_rows"], marker="o", label="Stage 7 rows")
-    ax.set_xticks(x)
-    ax.set_xticklabels(out["img_id"], rotation=90)
-    ax.set_ylabel("Count")
-    ax.set_title("Validation 1 — Per-image fragment inventory")
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(outdir / "validation1_img_inventory.png", dpi=200)
-    plt.close(fig)
+    # Improved publication-style validation plot
+    fig, ax = plt.subplots(figsize=(16, 7))
 
+    x = np.arange(len(out))
+
+    # Bars = Stage 6 fragment inventory
+    ax.bar(
+        x,
+        out["n_stage6_fragments"],
+        width=0.85,
+        alpha=0.85,
+        label="Stage 6 fragments",
+        zorder=1,
+    )
+
+    # Line = retained Stage 7 rows
+    ax.plot(
+        x,
+        out["n_stage7_rows"],
+        marker="o",
+        linewidth=2.0,
+        markersize=5,
+        label="Stage 7 retained fragments",
+        zorder=3,
+    )
+
+    # Highlight IMG entries contributing to Stage 8
+    contributes = out["contributes_to_stage8"].astype(bool).to_numpy()
+
+    ax.scatter(
+        x[contributes],
+        out.loc[contributes, "n_stage7_rows"],
+        s=45,
+        zorder=4,
+        label="Contributes to Stage 8",
+    )
+
+    # Cleaner x-axis labels
+    labels = out["img_id"].tolist()
+
+    step = 4  # show every 4th label
+    tick_idx = np.arange(0, len(labels), step)
+
+    ax.set_xticks(tick_idx)
+    ax.set_xticklabels(
+        [labels[i] for i in tick_idx],
+        rotation=90,
+        fontsize=9,
+    )
+
+    ax.set_ylabel("Fragment count")
+    ax.set_xlabel("JunoCam IMG product")
+    ax.set_title(
+        "Validation 1 — Per-image retained fragment accounting",
+        fontsize=18,
+        pad=12,
+    )
+
+    # Gridlines improve readability enormously
+    ax.grid(
+        axis="y",
+        linestyle="--",
+        alpha=0.35,
+        zorder=0,
+    )
+
+    # Better legend placement
+    ax.legend(
+        loc="upper left",
+        frameon=True,
+    )
+
+    # Slight margins
+    ax.margins(x=0.01)
+
+    ax.set_axisbelow(True)
+    
+    fig.tight_layout()
+
+    fig.savefig(
+        outdir / "validation1_img_inventory.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+    plt.close(fig)
     print(f"Wrote: {outdir / 'validation1_img_inventory.csv'}")
     print(f"Wrote: {outdir / 'validation1_img_inventory.png'}")
 

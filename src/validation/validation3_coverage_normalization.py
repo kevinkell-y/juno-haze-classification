@@ -22,9 +22,7 @@ def infer_bin_width(lat_centers: pd.Series) -> float:
         return 1.0
     diffs = np.diff(vals)
     diffs = diffs[diffs > 0]
-    if len(diffs) == 0:
-        return 1.0
-    return float(np.median(diffs))
+    return float(np.median(diffs)) if len(diffs) else 1.0
 
 
 def main():
@@ -51,8 +49,19 @@ def main():
         rename_map["frac_with_secondary"] = "stage8_occurrence"
     s8 = s8.rename(columns=rename_map)
 
-    required_v2 = {"lat_center", "n_total", "n_detectable", "frac_detectable"}
-    required_s8 = {"lat_center", "n_stage8_fragments", "n_stage8_secondary", "stage8_occurrence"}
+    required_v2 = {
+        "lat_center",
+        "n_total",
+        "n_detectability_valid",
+        "n_geometry_limited",
+        "frac_detectability_valid",
+    }
+    required_s8 = {
+        "lat_center",
+        "n_stage8_fragments",
+        "n_stage8_secondary",
+        "stage8_occurrence",
+    }
 
     missing_v2 = required_v2 - set(v2.columns)
     missing_s8 = required_s8 - set(s8.columns)
@@ -82,42 +91,50 @@ def main():
         tolerance=tol,
     )
 
-    # Clean, physically valid fractions
-    merged["retained_detectable_coverage"] = (
-        merged["n_stage8_fragments"] / merged["n_detectable"].replace(0, np.nan)
+    # Fractions used for denominator validation
+    merged["retained_detectability_valid_coverage"] = (
+        merged["n_stage8_fragments"] /
+        merged["n_detectability_valid"].replace(0, np.nan)
     ).clip(lower=0, upper=1)
 
-    merged["secondary_among_detectable"] = (
-        merged["n_stage8_secondary"] / merged["n_detectable"].replace(0, np.nan)
+    merged["secondary_among_detectability_valid"] = (
+        merged["n_stage8_secondary"] /
+        merged["n_detectability_valid"].replace(0, np.nan)
     ).clip(lower=0, upper=1)
 
-    merged["detectable_among_total"] = merged["frac_detectable"].clip(lower=0, upper=1)
+    merged["detectability_valid_among_total"] = (
+        merged["frac_detectability_valid"]
+    ).clip(lower=0, upper=1)
 
     merged.to_csv(outdir / "validation3_coverage_normalization.csv", index=False)
 
     fig, ax = plt.subplots(figsize=(10, 5))
+
     ax.plot(
         merged["lat_center"],
         merged["stage8_occurrence"],
         marker="o",
         label="Stage 8 occurrence",
     )
+
     ax.plot(
         merged["lat_center"],
-        merged["retained_detectable_coverage"],
+        merged["retained_detectability_valid_coverage"],
         marker="o",
-        label="Retained / detectable coverage",
+        label="Retained / detectability-valid coverage",
     )
+
     ax.plot(
         merged["lat_center"],
-        merged["detectable_among_total"],
+        merged["detectability_valid_among_total"],
         marker="o",
-        label="Detectable / total fragments",
+        label="Detectability-valid / total fragments",
     )
+
     ax.set_xlabel("Planetocentric latitude bin center (deg)")
     ax.set_ylabel("Fraction")
     ax.set_ylim(0, 1.05)
-    ax.set_title("Validation 3 — Occurrence vs retained coverage by latitude")
+    ax.set_title("Validation 3 — Occurrence vs retained detectability-valid coverage")
     ax.legend()
     fig.tight_layout()
     fig.savefig(outdir / "validation3_coverage_normalization.png", dpi=200)

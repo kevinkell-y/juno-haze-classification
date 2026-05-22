@@ -42,7 +42,6 @@ def compute_rep_lat(frag: pd.DataFrame) -> float | None:
         return None
 
     primary_pos = frag.index.get_loc(primary_rows.index[0])
-
     lat_vals = pd.to_numeric(frag["PlanetocentricLatitude"], errors="coerce").to_numpy(float)
 
     primary_lat = lat_vals[primary_pos]
@@ -89,10 +88,10 @@ def main():
             if lat is None or not np.isfinite(lat):
                 continue
 
-            det = False
+            detectability_valid = False
             if "detectability_flag" in frag.columns:
                 val = frag["detectability_flag"].iloc[0]
-                det = str(val).strip().lower() in {"true", "1", "yes"}
+                detectability_valid = str(val).strip().lower() in {"true", "1", "yes"}
 
             has_secondary = False
             if "stage6_peak_type" in frag.columns:
@@ -103,7 +102,8 @@ def main():
                 "framelet": framelet,
                 "fragment_id": int(frag_id),
                 "limb_lat": float(lat),
-                "detectable": bool(det),
+                "detectability_valid": bool(detectability_valid),
+                "geometry_limited": bool(not detectability_valid),
                 "has_secondary": bool(has_secondary),
             })
 
@@ -115,15 +115,20 @@ def main():
 
     g = all_frags.groupby("lat_bin", observed=True).agg(
         n_total=("fragment_id", "size"),
-        n_detectable=("detectable", "sum"),
-        n_nondetectable=("detectable", lambda s: (~s).sum()),
-        n_secondary_detectable=("has_secondary", lambda s: s[all_frags.loc[s.index, "detectable"]].sum()),
+        n_detectability_valid=("detectability_valid", "sum"),
+        n_geometry_limited=("geometry_limited", "sum"),
+        n_secondary_detectability_valid=(
+            "has_secondary",
+            lambda s: s[all_frags.loc[s.index, "detectability_valid"]].sum()
+        ),
     ).reset_index()
 
     g["lat_left"] = g["lat_bin"].map(lambda iv: float(iv.left))
     g["lat_right"] = g["lat_bin"].map(lambda iv: float(iv.right))
     g["lat_center"] = g["lat_bin"].map(interval_mid)
-    g["frac_detectable"] = g["n_detectable"] / g["n_total"].replace(0, np.nan)
+    g["frac_detectability_valid"] = (
+        g["n_detectability_valid"] / g["n_total"].replace(0, np.nan)
+    )
 
     out = g[[
         "lat_bin",
@@ -131,21 +136,32 @@ def main():
         "lat_right",
         "lat_center",
         "n_total",
-        "n_detectable",
-        "n_nondetectable",
-        "n_secondary_detectable",
-        "frac_detectable",
+        "n_detectability_valid",
+        "n_geometry_limited",
+        "n_secondary_detectability_valid",
+        "frac_detectability_valid",
     ]].copy()
 
     out.to_csv(outdir / "validation2_detectability_by_latitude.csv", index=False)
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(out["lat_center"], out["n_total"], marker="o", label="Total fragments")
-    ax.plot(out["lat_center"], out["n_detectable"], marker="o", label="Detectable fragments")
-    ax.plot(out["lat_center"], out["n_nondetectable"], marker="o", label="Non-detectable fragments")
+    ax.plot(
+        out["lat_center"],
+        out["n_detectability_valid"],
+        marker="o",
+        label="Detectability-valid fragments",
+    )
+    ax.plot(
+        out["lat_center"],
+        out["n_geometry_limited"],
+        marker="o",
+        label="Geometry-limited fragments",
+    )
+
     ax.set_xlabel("Planetocentric latitude bin center (deg)")
     ax.set_ylabel("Fragment count")
-    ax.set_title("Validation 2 — Detectable vs non-detectable fragments by latitude")
+    ax.set_title("Validation 2 — Detectability-valid vs geometry-limited fragments by latitude")
     ax.legend()
     fig.tight_layout()
     fig.savefig(outdir / "validation2_detectability_by_latitude.png", dpi=200)
