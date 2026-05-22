@@ -241,7 +241,7 @@ def plot_detectability_vs_lat(df: pd.DataFrame, out_png: Path) -> None:
         plot_df.loc[~detectable, "pixels_per_detachment"],
         s=18,
         alpha=0.5,
-        label="Non-detectable fragments",
+        label="Geometry-limited fragments",
     )
     
     plt.scatter(
@@ -249,7 +249,7 @@ def plot_detectability_vs_lat(df: pd.DataFrame, out_png: Path) -> None:
         plot_df.loc[detectable, "pixels_per_detachment"],
         s=18,
         alpha=0.5,
-        label="Detectable fragments",
+        label="Detectability-valid fragments",
     )
 
     # Binned median trend
@@ -275,7 +275,7 @@ def plot_detectability_vs_lat(df: pd.DataFrame, out_png: Path) -> None:
     )
     plt.xlabel("Planetocentric latitude (deg)")
     plt.ylabel("Pixels per nominal detached-haze separation")
-    plt.title("Stage 4b Detectability vs Latitude")
+    plt.title("Stage 4b Detectability-valid vs Geometry-limited Structure")
     plt.legend()
     plt.tight_layout()
     plt.savefig(out_png, dpi=300)
@@ -297,7 +297,7 @@ def plot_km_per_pixel_vs_slant(df: pd.DataFrame, out_png: Path) -> None:
         plot_df.loc[~detectable, "km_per_pixel_at_limb"],
         s=18,
         alpha=0.5,
-        label="Non-detectable fragments",
+        label="Geometry-limited fragments",
     )
 
     plt.scatter(
@@ -305,7 +305,7 @@ def plot_km_per_pixel_vs_slant(df: pd.DataFrame, out_png: Path) -> None:
         plot_df.loc[detectable, "km_per_pixel_at_limb"],
         s=18,
         alpha=0.5,
-        label="Detectable fragments",
+        label="Detectability-valid fragments",
     )
     
     # Binned median trend
