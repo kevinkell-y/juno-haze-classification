@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# PJ14 batch runner: Stage 01 -> Stage 02
-# Designed to stop AFTER Stage 02 so you can do manual QC before Stage 03.
+# Perijove batch runner: Stage 01 -> Stage 02
+# Designed to stop AFTER Stage 02 so manual Stage 2.5 QC can happen before Stage 03.
 #
 # Assumptions:
-# - Run from anywhere
+# - Run from anywhere inside/outside the repo
 # - Active conda env already has ISIS/Juno dependencies
-# - Frozen code lives in: data/PJ14/src_snapshot
-# - Raw IMG/LBL files live in: data/PJ14/raw
+# - Script lives in: <repo>/src/
+# - Raw IMG/LBL files live in: <repo>/data/<PJ>/raw
+# - Outputs go to: <repo>/data/<PJ>/cub and <repo>/data/<PJ>/logs
 
-PJDIR="/media/user/4TB/JUNO/data/PJ14"
+PJ="${1:?Usage: ./run_perijove_batch_stage1-2.sh PJ05}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JUNO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+PJDIR="$JUNO_ROOT/data/$PJ"
 RAW_DIR="$PJDIR/raw"
-SRC_DIR="/media/user/4TB/JUNO/src"
+SRC_DIR="$JUNO_ROOT/src"
 CUB_ROOT="$PJDIR/cub"
 LOG_ROOT="$PJDIR/logs"
 
@@ -44,10 +50,32 @@ require_dir() {
   [[ -d "$d" ]] || fail "Missing required directory: $d"
 }
 
+require_command() {
+  local c="$1"
+  command -v "$c" >/dev/null 2>&1 || fail "Required command not found: $c"
+}
+
+count_files() {
+  local dir="$1"
+  local pattern="$2"
+  [[ -d "$dir" ]] || { echo 0; return; }
+  find "$dir" -maxdepth 1 -type f -name "$pattern" 2>/dev/null | wc -l
+}
+
+has_zero_byte_files() {
+  local dir="$1"
+  [[ -d "$dir" ]] && find "$dir" -type f -size 0 | grep -q .
+}
+
 require_dir "$RAW_DIR"
 require_dir "$SRC_DIR"
 require_file "$STAGE1_PY"
 require_file "$STAGE2_PY"
+
+require_command python
+require_command junocam2isis
+require_command spiceinit
+require_command isis2std
 
 shopt -s nullglob
 imgs=( "$RAW_DIR"/*.IMG )
@@ -57,7 +85,8 @@ if [[ ${#imgs[@]} -eq 0 ]]; then
 fi
 
 log "Found ${#imgs[@]} IMG files in $RAW_DIR"
-log "Using source snapshot: $SRC_DIR"
+log "JUNO root: $JUNO_ROOT"
+log "Using source directory: $SRC_DIR"
 log "Starting Stage 01 -> Stage 02 batch run"
 
 success_count=0
@@ -81,23 +110,20 @@ for img in "${imgs[@]}"; do
   log "------------------------------------------------------------"
   log "IMG: $base"
 
-  # Skip logic: manually QC'd
   if [[ -f "$stage2_out/.manual_qc_done" ]]; then
     log "Skipping $base (Stage 02 manually QC'd)"
     ((skip_count+=1))
     continue
   fi
-  
-  # Skip logic: if Stage 02 already has outputs, assume done.
-  if [[ -d "$stage2_out" ]] && compgen -G "$stage2_out/*_LIMBENDPOINTS.csv" > /dev/null; then
-    log "Skipping $base (Stage 02 outputs already present)"
-    ((skip_count+=1))
-    continue
-  fi
 
   # Stage 01
-  if [[ ! -d "$stage1_out" ]] || ! compgen -G "$stage1_out/*.cub" > /dev/null; then
+  stage1_cub_count=$(count_files "$stage1_out" "*.cub")
+
+  if [[ "$stage1_cub_count" -eq 0 ]] || has_zero_byte_files "$stage1_out"; then
     log "Running Stage 01 for $base"
+
+    rm -rf "$stage1_out"
+
     {
       echo "[$(timestamp)] START Stage 01: $base"
       python "$STAGE1_PY" \
@@ -113,8 +139,30 @@ for img in "${imgs[@]}"; do
     log "Stage 01 already exists for $base; skipping Stage 01"
   fi
 
+  # Stage 01 validation
+  stage1_cub_count=$(count_files "$stage1_out" "*.cub")
+  if [[ "$stage1_cub_count" -eq 0 ]] || has_zero_byte_files "$stage1_out"; then
+    log "Stage 01 validation FAILED for $base"
+    ((fail_count+=1))
+    continue
+  fi
+
   # Stage 02
+  stage2_limb_count=$(count_files "$stage2_out" "*_LIMBENDPOINTS.csv")
+  stage2_overlay_count=$(count_files "$stage2_out" "*_OVERLAY.png")
+
+  if [[ "$stage2_limb_count" -eq "$stage1_cub_count" ]] && \
+     [[ "$stage2_overlay_count" -eq "$stage1_cub_count" ]] && \
+     ! has_zero_byte_files "$stage2_out"; then
+    log "Skipping Stage 02 for $base (complete outputs already present)"
+    ((skip_count+=1))
+    continue
+  fi
+
   log "Running Stage 02 for $base"
+
+  rm -rf "$stage2_out"
+
   {
     echo "[$(timestamp)] START Stage 02: $base"
     python "$STAGE2_PY" \
@@ -128,7 +176,26 @@ for img in "${imgs[@]}"; do
     continue
   }
 
+  # Stage 02 validation
+  stage2_limb_count=$(count_files "$stage2_out" "*_LIMBENDPOINTS.csv")
+  stage2_overlay_count=$(count_files "$stage2_out" "*_OVERLAY.png")
+
+  if [[ "$stage2_limb_count" -eq 0 ]] || \
+     [[ "$stage2_overlay_count" -eq 0 ]] || \
+     [[ "$stage2_limb_count" -ne "$stage2_overlay_count" ]] || \
+     has_zero_byte_files "$stage2_out"; then
+    log "Stage 02 validation FAILED for $base"
+    log "  LIMBENDPOINTS CSV: $stage2_limb_count"
+    log "  OVERLAY PNG      : $stage2_overlay_count"
+    ((fail_count+=1))
+    continue
+  fi
+
   log "Completed Stage 01-02 for $base"
+  log "  Stage 01 cubes       : $stage1_cub_count"
+  log "  Stage 02 limb CSVs   : $stage2_limb_count"
+  log "  Stage 02 overlay PNGs: $stage2_overlay_count"
+
   ((success_count+=1))
 done
 
@@ -139,6 +206,6 @@ log "Skipped:   $skip_count"
 log "Failed:    $fail_count"
 log "Manual QC is next:"
 log "  - inspect stage_02_trace_polyline outputs"
-log "  - delete bad limb traces"
+log "  - delete bad *_LIMBENDPOINTS.csv and matching *_OVERLAY.png"
 log "  - remove framelets where Jupiter fills the frame"
 log "  - only then proceed to Stage 03-07"
