@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
         "--imgdir",
         type=str,
         required=True,
-        help="IMG-scoped root directory, e.g. data/JNCR_2018197_14C00024_V01",
+        help="IMG-scoped root directory, e.g. data/JNCR_YYYYDDD_xxCxxxxx_V01",
     )
     ap.add_argument(
         "--stage6-root",
@@ -150,7 +150,7 @@ def infer_img_label_from_stage6(stage6_csvs: list[Path]) -> str:
     """
     Infer IMG ID from Stage 6 CSVs by stripping color and framelet suffixes.
     Example:
-      JNCR_2018197_14C00024_V01_BLUE_0003 -> JNCR_2018197_14C00024_V01
+      JNCR_YYYYDDD_xxCxxxxx_V01_BLUE_0003 -> JNCR_YYYYDDD_xxCxxxxx_V01
     """
     if not stage6_csvs:
         return "UNKNOWN_IMG"
