@@ -29,12 +29,12 @@ def main():
     args = parse_args()
     pjdir = Path(args.pjdir).resolve()
     outdir = Path(args.outdir).resolve() if args.outdir else (
-        pjdir / "analysis" / "PJ14_stage_08_perijove_analysis" / "validation"
+        pjdir / "analysis" / "stage_08_perijove_analysis" / "validation"
     )
     outdir.mkdir(parents=True, exist_ok=True)
 
     v2_path = outdir / "validation2_detectability_by_latitude.csv"
-    s8_path = pjdir / "analysis" / "PJ14_stage_08_perijove_analysis" / "stage8_latitude_bins.csv"
+    s8_path = pjdir / "analysis" / "stage_08_perijove_analysis" / "stage8_latitude_bins.csv"
 
     v2 = pd.read_csv(v2_path, low_memory=False)
     s8 = pd.read_csv(s8_path, low_memory=False)

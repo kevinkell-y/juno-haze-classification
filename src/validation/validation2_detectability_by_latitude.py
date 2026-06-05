@@ -64,7 +64,7 @@ def main():
     args = parse_args()
     pjdir = Path(args.pjdir).resolve()
     outdir = Path(args.outdir).resolve() if args.outdir else (
-        pjdir / "analysis" / "PJ14_stage_08_perijove_analysis" / "validation"
+        pjdir / "analysis" / "stage_08_perijove_analysis" / "validation"
     )
     outdir.mkdir(parents=True, exist_ok=True)
 

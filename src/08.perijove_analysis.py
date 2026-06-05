@@ -62,10 +62,10 @@ def parse_args() -> argparse.Namespace:
                     help="Glob under --pjdir to find Stage 6 per-sample CSVs.")
 
     ap.add_argument("--outdir", type=str, default=None,
-                    help="Output dir. Default: <pjdir>/analysis/PJ14_stage_08_perijove_analysis")
+                    help="Output dir. Default: <pjdir>/analysis/stage_08_perijove_analysis")
 
     ap.add_argument("--pj-label", type=str, default=None,
-                    help="Label stamped on plots, e.g. 'Perijove 14'.")
+                    help="Optional label stamped on plots, e.g. 'Perijove 05'.")
 
     ap.add_argument("--img-id-col", type=str, default="img_id",
                     help="Column name added for IMG identifier.")
@@ -530,7 +530,7 @@ def plot_lonlat_map(
 def main() -> None:
     args = parse_args()
     pjdir = Path(args.pjdir).resolve()
-    outdir = Path(args.outdir).resolve() if args.outdir else (pjdir / "analysis" / "PJ14_stage_08_perijove_analysis")
+    outdir = Path(args.outdir).resolve() if args.outdir else (pjdir / "analysis" / "stage_08_perijove_analysis")
     outdir.mkdir(parents=True, exist_ok=True)
 
     # Load Stage 7

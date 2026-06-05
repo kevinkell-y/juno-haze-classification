@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 
 def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pjdir", required=True, help="Perijove root, e.g. /media/user/4TB/JUNO/data/PJ14")
-    ap.add_argument("--outdir", default=None, help="Default: <pjdir>/analysis/PJ14_stage_08_perijove_analysis/validation")
+    ap.add_argument("--pjdir", required=True, help="Perijove root, e.g. data/PJ05")
+    ap.add_argument("--outdir", default=None, help="Default: <pjdir>/analysis/stage_08_perijove_analysis/validation")
     return ap.parse_args()
 
 
@@ -47,13 +47,13 @@ def count_stage6_fragments(stage6_root: Path):
 def main():
     args = parse_args()
     pjdir = Path(args.pjdir).resolve()
-    outdir = Path(args.outdir).resolve() if args.outdir else (pjdir / "analysis" / "PJ14_stage_08_perijove_analysis" / "validation")
+    outdir = Path(args.outdir).resolve() if args.outdir else (pjdir / "analysis" / "stage_08_perijove_analysis" / "validation")
     outdir.mkdir(parents=True, exist_ok=True)
 
     analysis_dir = pjdir / "analysis"
     cub_dir = pjdir / "cub"
 
-    stage8_dir = pjdir / "analysis" / "PJ14_stage_08_perijove_analysis"
+    stage8_dir = pjdir / "analysis" / "stage_08_perijove_analysis"
     stage8_raw = stage8_dir / "stage8_fragments_all_raw.csv"
     stage8_valid = stage8_dir / "stage8_fragments_all.csv"
 
